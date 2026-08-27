@@ -1,0 +1,23 @@
+{
+  "name": "primeroedge-pos-automation",
+  "version": "1.0.0",
+  "description": "Playwright regression suite for the PrimeroEdge Point of Service module",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "report:show": "npx playwright show-report",
+    "encrypt": "npx ts-node scripts/encryptPassword.ts"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.0"
+  }
+}
