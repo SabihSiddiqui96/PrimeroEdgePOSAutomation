@@ -192,6 +192,14 @@ const EXCLUDE = new Set([
   // absolute path under this user profile, so it is meaningless once copied
   // there — and it is not test automation, which is all the shared repo wants.
   'scripts/sync-to-platform.js',
+  // Repo furniture that belongs to this repo, not to a folder inside someone
+  // else's monorepo. A nested .gitignore would quietly change what the platform
+  // repo ignores under this path, and the rest is documentation and formatting
+  // config the shared repo has its own versions of.
+  '.gitignore',
+  '.prettierrc',
+  '.env.example',
+  'README.md',
 ]);
 
 if (EXCLUDE.size) {
