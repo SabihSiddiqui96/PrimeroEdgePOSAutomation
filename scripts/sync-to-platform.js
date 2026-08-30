@@ -188,6 +188,10 @@ const EXCLUDE = new Set([
   // from the mirror - so both are broken by construction anywhere but here.
   'scripts/auto-rerun-latest.js',
   'scripts/auto-rerun-hidden.vbs',
+  // This script itself. It mirrors *into* the platform repo and hardcodes an
+  // absolute path under this user profile, so it is meaningless once copied
+  // there — and it is not test automation, which is all the shared repo wants.
+  'scripts/sync-to-platform.js',
 ]);
 
 if (EXCLUDE.size) {
