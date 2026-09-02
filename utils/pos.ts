@@ -98,3 +98,16 @@ export async function openPosSection(page: Page, name: PosSection): Promise<void
 export function districtSelector(page: Page) {
   return page.getByRole('button', { name: /SCHOOLS|DISTRICT|ISD/i }).first();
 }
+
+/**
+ * Log in and open a POS page directly by its path.
+ *
+ * The nav accordion has to be expanded before a section's links are clickable,
+ * so specs that only care about one screen go straight to its URL instead.
+ */
+export async function openPosPage(page: Page, path: string): Promise<Page> {
+  await loginToPrimeroEdge(page);
+  await page.goto(path, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('domcontentloaded');
+  return page;
+}
