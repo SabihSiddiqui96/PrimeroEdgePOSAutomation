@@ -72,16 +72,48 @@ export async function expectOptions(page: Page, id: string, options: string[]): 
   expect(actual, `options of #${id}`).toEqual(options);
 }
 
-/** A `<select>` offers something to pick, whatever the district has configured. */
+/** "-- SELECT --", "--ALL--", "(none)" and friends: a prompt, not a choice. */
+const PLACEHOLDER_OPTION = /^[-\s(]*(select|all|none|choose)[-\s)]*$/i;
+
+/**
+ * A `<select>` offers something real to pick, whatever the district configured.
+ *
+ * Placeholders do not count. A cascading dropdown that failed to populate still
+ * renders its "-- SELECT --" row, and counting that would let this pass on
+ * exactly the breakage it exists to catch.
+ */
 export async function expectHasOptions(page: Page, id: string, minimum = 1): Promise<void> {
   await expect(page.locator(`#${id}`), `#${id}`).toBeVisible();
-  const actual = await optionTexts(page, id);
-  expect(actual.length, `options of #${id}`).toBeGreaterThanOrEqual(minimum);
+  const real = (await optionTexts(page, id)).filter((text) => !PLACEHOLDER_OPTION.test(text));
+  expect(real.length, `real options of #${id}`).toBeGreaterThanOrEqual(minimum);
 }
 
 export async function optionTexts(page: Page, id: string): Promise<string[]> {
   const texts = await page.locator(`#${id} option`).allTextContents();
   return texts.map((text) => text.replace(/\s+/g, ' ').trim());
+}
+
+/**
+ * Header text as a person reads it.
+ *
+ * RadGrid appends a hidden "HeaderText" span to every column for screen
+ * readers, and Telerik markup carries zero-width characters that textContent
+ * picks up. Neither is on screen. Everything else — including accented
+ * characters in a column name — is kept.
+ */
+function headerText(raw: string): string {
+  const invisible = (code: number) =>
+    code < 0x20 ||
+    code === 0x7f ||
+    (code >= 0x200b && code <= 0x200f) ||
+    code === 0x2060 ||
+    code === 0xfeff;
+
+  return Array.from(raw.replace(/HeaderText/g, ''))
+    .filter((character) => !invisible(character.codePointAt(0) ?? 0))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -96,19 +128,17 @@ export async function expectGridColumns(
   columns: string[],
 ): Promise<void> {
   const headers = await page.locator(`#${gridId} th`).allTextContents();
-  // RadGrid appends a hidden "HeaderText" span to each header for screen
-  // readers, which textContent picks up but the user never sees.
-  const actual = headers.map((text) =>
-    text
-      .replace(/HeaderText/g, '')
-      .replace(/[^\x20-\x7E]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim(),
-  );
+  const actual = headers.map(headerText);
   for (const column of columns) {
     expect(actual, `columns of #${gridId}`).toContain(column);
   }
 }
+
+/**
+ * How a grid says it has nothing: RadGrid's own "No records to display.", and
+ * the hand-written variants screens use instead ("No claims found.").
+ */
+const EMPTY_GRID = /\bno\b.{0,30}\b(found|to display|available)\b|\bno records\b/i;
 
 /**
  * A grid has resolved one way or the other: either it lists rows, or it says it
@@ -124,12 +154,6 @@ export async function expectGridResolved(page: Page, gridId: string): Promise<vo
     await expect(grid, `#${gridId} says it is empty`).toContainText(EMPTY_GRID);
   }
 }
-
-/**
- * How a grid says it has nothing: RadGrid's own "No records to display.", and
- * the hand-written variants screens use instead ("No claims found.").
- */
-const EMPTY_GRID = /\bno\b.{0,30}\b(found|to display|available)\b|\bno records\b/i;
 
 /** Submit buttons, checked by id and by the caption they carry. */
 export async function expectButtons(page: Page, buttons: [string, string][]): Promise<void> {
