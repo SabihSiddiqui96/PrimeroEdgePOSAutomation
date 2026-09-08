@@ -44,9 +44,27 @@ export async function loginToPrimeroEdge(page: Page): Promise<void> {
  * tile navigates in the same tab and no window handling is needed.
  */
 export async function openPointOfService(page: Page): Promise<Page> {
-  await loginToPrimeroEdge(page);
+  await signIn(page);
   await goToPosHome(page);
   return page;
+}
+
+/**
+ * Put the page on an authenticated session.
+ *
+ * Specs start from the session global setup cached, so the dashboard normally
+ * opens straight away and no form is involved. Classic bounces to the login
+ * page once that session expires, which is the only case that still needs one.
+ */
+export async function signIn(page: Page): Promise<void> {
+  await page.goto(getDashboardPath(), { waitUntil: 'domcontentloaded' });
+  if (isOnLoginPage(page)) {
+    await loginToPrimeroEdge(page);
+  }
+}
+
+function isOnLoginPage(page: Page): boolean {
+  return page.url().toLowerCase().includes(getLoginPath().toLowerCase());
 }
 
 /**
@@ -106,8 +124,15 @@ export function districtSelector(page: Page) {
  * so specs that only care about one screen go straight to its URL instead.
  */
 export async function openPosPage(page: Page, path: string): Promise<Page> {
-  await loginToPrimeroEdge(page);
   await page.goto(path, { waitUntil: 'domcontentloaded' });
+
+  // One navigation is enough with a live session. If it has expired Classic
+  // sends us to the login form instead, so sign in and ask for the page again.
+  if (isOnLoginPage(page)) {
+    await loginToPrimeroEdge(page);
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+  }
+
   await page.waitForLoadState('domcontentloaded');
   return page;
 }

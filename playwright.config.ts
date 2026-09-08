@@ -19,6 +19,7 @@ dotenv.config({ path: resolveEnvFile() });
 
 import { defineConfig, devices } from '@playwright/test';
 import { getBaseUrl } from './utils/baseUrl';
+import { getAuthStoragePath } from './utils/authStorage';
 import { positiveIntFromEnv } from './utils/env';
 
 export default defineConfig({
@@ -39,6 +40,9 @@ export default defineConfig({
   ],
   use: {
     baseURL: getBaseUrl(),
+    // The session global setup signs in for. Without this every spec would
+    // repeat a slow WebForms login for no benefit.
+    storageState: getAuthStoragePath(),
     headless: !!process.env.CI,
     ignoreHTTPSErrors: true,
     actionTimeout: positiveIntFromEnv('ACTION_TIMEOUT_MS', process.env.CI ? 45000 : 15000),
