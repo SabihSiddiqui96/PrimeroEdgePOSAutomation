@@ -9,9 +9,11 @@
  * repo's several hundred.
  *
  * Only files git already tracks here are copied, which is what keeps secrets
- * out: .env, .env.release, node_modules, test-results and CLAUDE.md are all
- * gitignored, so they can never reach the shared repo. Files deleted here are
- * deleted there too, so the folder is a true mirror rather than an append.
+ * out: .env, .env.release, node_modules and test-results are all gitignored,
+ * so they can never reach the shared repo. CLAUDE.md is tracked but excluded
+ * below — it is how this repo is worked on, not part of the test automation.
+ * Files deleted here are deleted there too, so the folder is a true mirror
+ * rather than an append.
  *
  * The mirror never lands on AutomationProjects itself. That branch is shared
  * company code, so each sync cuts its own camelCase branch off it, pushes there,
@@ -192,6 +194,9 @@ const EXCLUDE = new Set([
   // absolute path under this user profile, so it is meaningless once copied
   // there — and it is not test automation, which is all the shared repo wants.
   'scripts/sync-to-platform.js',
+  // House rules for working in this repo - ticket conventions, hour logging,
+  // how to reach the tracker. Useful here, noise in a shared monorepo.
+  'CLAUDE.md',
   // Repo furniture that belongs to this repo, not to a folder inside someone
   // else's monorepo. A nested .gitignore would quietly change what the platform
   // repo ignores under this path, and the rest is documentation and formatting

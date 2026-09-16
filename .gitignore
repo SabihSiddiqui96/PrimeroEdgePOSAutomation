@@ -23,7 +23,6 @@ npm-debug.log*
 # Local tooling state
 .claude/
 .claude-flow/
-CLAUDE.md
 .mcp.json
 
 # OS
