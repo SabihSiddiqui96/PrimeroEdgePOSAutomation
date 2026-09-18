@@ -102,6 +102,23 @@ If any change touches
 create a new branch, push there, and have a reviewer create the CR. Never push
 directly to `main`/`master` on that ADO repo.
 
+**Reviewers on every platform PR.**
+Required: **Venkata Pranitha Raj Kondaveeti**.
+Optional: **Haritha Manne**, **Jagadeesh Kumar Yadlapalli**, **Prasoona Nalajala**.
+
+**Branch names are camelCase** — no dashes, underscores or slashes.
+`posDailyReports`, `paginationFix`. The mirror script rejects anything else.
+
+**Mirroring with `scripts/sync-to-platform.js`, two traps.** It cuts the branch
+from the *local* `AutomationProjects`, which goes stale and silently re-includes
+already-merged work — `git -C <platform> fetch && git checkout AutomationProjects
+&& git reset --hard origin/AutomationProjects` first, then check the file count
+matches the slice. And it refuses to run when the platform checkout is dirty; an
+untracked `CLAUDE.md` lives there, so move it aside and put it straight back.
+
+It also rebuilds the branch on every run, so never run it against a branch that
+carries anyone else's commits — copy the files and commit by hand instead.
+
 **Always set auto-complete.** Tick **Set auto-complete** — the checkbox next to
 the Create button on the new-PR form, or the button on the PR afterwards — so it
 merges itself the moment the required reviewer approves and the branch policies
@@ -109,6 +126,63 @@ pass. Nobody should have to come back and press Complete.
 
 Set it on every PR, including one already open. Confirm it took: the PR header
 switches to showing auto-complete is on, rather than offering to set it.
+
+---
+
+## Slicing the work
+
+**One small slice per PR, never the backlog.** Roughly a section at a time, or
+5-14 screens. Sabih reviews and merges each one; a big drop is unreviewable.
+Say what the slice contains and what is left in the queue.
+
+**Nothing in a PR but the work itself.** No local tooling, no machine-specific
+files, no "while I was in there" extras. `EXCLUDE` in `scripts/sync-to-platform.js`
+is where to add anything that should stop reaching the shared repo.
+
+**PR descriptions are a few bullets of what changed.** No rationale essays, no
+provenance lines, no explaining the mechanics. Four short bullets is right.
+
+---
+
+## Before you push
+
+**Self code review is a required step, not optional:** write → review → fix →
+push → PR. Review it as an engineer with twenty years behind them would: look
+for assertions that can pass while the thing under test is broken, locators that
+will drift, hard-coded data that will rot, duplication, and anything slow or
+flaky at suite scale. Fix the real findings and say which ones were deliberately
+left.
+
+**Grep the batch for district data baked into assertions** before running — it
+is the failure this suite keeps producing:
+
+```
+grep -rn "^\s*'[^']*[0-9$][^']*',\?$" tests/<section> | grep -v ctl00_
+grep -rniE "'(input|label|form|text) (field|input) [0-9]+'" tests/<section>
+```
+
+Site counts, dates and balances change on QA; placeholder captions like
+`Input field 3` are accessibility names, not labels. Match the shape
+(`/Not Configured:\s*\d+\s*Site\(s\)/`) or drop the assertion.
+
+**Run the slice against QA and get it green before pushing.** Never push specs
+that have not been run.
+
+---
+
+## Known QA gaps
+
+Four POS pages answer with an Internal Server Error on QA, so their specs are
+`test.fixme` until the pages are fixed:
+
+- Administration > Serving Exceptions — `/POS/DuplicateMeal.aspx`
+- Daily Reports > Duplicate Meals — `/POS/DuplicateMealsReport.aspx`
+- Management > Meals Per Labor Hour — `/POS/MealPerLaborHourReport.aspx`
+- Orders > Order Fulfillment — `/POS/OrderFulfillment.aspx`
+
+`tests/configuration/meal_equivalents` asserts seven captions named
+`Input field 1` … `Input field 7`. Those are accessibility placeholder names,
+not real labels — fix them when Configuration ships.
 
 ---
 
