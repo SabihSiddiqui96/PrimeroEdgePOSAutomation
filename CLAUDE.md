@@ -102,6 +102,14 @@ If any change touches
 create a new branch, push there, and have a reviewer create the CR. Never push
 directly to `main`/`master` on that ADO repo.
 
+**Always set auto-complete.** Tick **Set auto-complete** — the checkbox next to
+the Create button on the new-PR form, or the button on the PR afterwards — so it
+merges itself the moment the required reviewer approves and the branch policies
+pass. Nobody should have to come back and press Complete.
+
+Set it on every PR, including one already open. Confirm it took: the PR header
+switches to showing auto-complete is on, rather than offering to set it.
+
 ---
 
 ## QA Ticket Flow — Staged Gates
