@@ -40,7 +40,7 @@ variables:
   - name: LOGIN_PATH
     value: /login.aspx
   - name: RUN_LABEL
-    value: POS QA
+    value: QA Testing
 
 stages:
   - stage: Run_Playwright
@@ -101,24 +101,17 @@ stages:
 
 
           # Heads-up that the run has begun, so a silent night is visibly a
-          # missing message rather than an assumed pass. Non-fatal by design:
-          # a webhook outage must not fail the suite, and an unset
-          # RINGCENTRAL_WEBHOOK_URL simply skips the ping.
-          - script: |
-              if [ -z "$RINGCENTRAL_WEBHOOK_URL" ]; then
-                echo "RINGCENTRAL_WEBHOOK_URL is not set - skipping the ping."
-                exit 0
-              fi
-              payload=$(printf '{"text":"PrimeroEdge POS %s started.\n\n%s"}' "$RUN_LABEL" "$BUILD_URL")
-              curl -sS -X POST "$RINGCENTRAL_WEBHOOK_URL" \
-                -H 'Content-Type: application/json' \
-                -d "$payload" || true
-              echo
+          # missing message rather than an assumed pass. The script never exits
+          # non-zero and skips itself when the webhook variable is unset, so a
+          # webhook outage cannot fail the suite.
+          - script: node scripts/notify-ringcentral.js --started
             displayName: Notify RingCentral - started
             env:
               RINGCENTRAL_WEBHOOK_URL: $(RINGCENTRAL_WEBHOOK_URL)
               RUN_LABEL: $(RUN_LABEL)
-              BUILD_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+              COLLECTION_URI: $(System.CollectionUri)
+              TEAM_PROJECT: $(System.TeamProject)
+              BUILD_ID: $(Build.BuildId)
 
 
           - script: npx playwright test --workers=1
@@ -202,4 +195,7 @@ stages:
             env:
               RINGCENTRAL_WEBHOOK_URL: $(RINGCENTRAL_WEBHOOK_URL)
               SUITE_RESULT: $(SUITE_RESULT)
-              BUILD_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+              RUN_LABEL: $(RUN_LABEL)
+              COLLECTION_URI: $(System.CollectionUri)
+              TEAM_PROJECT: $(System.TeamProject)
+              BUILD_ID: $(Build.BuildId)

@@ -1,83 +1,161 @@
 /**
  * Post the POS suite result to RingCentral.
  *
- * Reads Playwright's JSON reporter output and sends one message: a pass line,
- * or a count plus the failing test names. Called from azure-pipelines.yml after
- * the run, with the webhook supplied as a secret pipeline variable.
+ * Matches the K12 nightly's message so the channel reads the same way for both
+ * suites: a counts table, duration, the failing tests grouped by spec, and a
+ * link straight to the results tab. Called from azure-pipelines.yml, with the
+ * webhook supplied as a secret pipeline variable.
  *
  *   node scripts/notify-ringcentral.js
  *
  * Env:
  *   RINGCENTRAL_WEBHOOK_URL  required; when unset the script exits quietly, so
- *                            a fork or a local run does not fail on it
+ *                            a local run or a fork does not fail on it
  *   RESULTS_JSON             path to results.json (default test-results/results.json)
  *   SUITE_RESULT             the run stage's outcome, for the no-results case
- *   BUILD_URL                link appended to the message
+ *   RUN_LABEL                friendly run name, e.g. "POS QA"
+ *   COLLECTION_URI / TEAM_PROJECT / BUILD_ID   used to build the links
  *
- * Never exits non-zero: a webhook outage should not turn a green suite red.
+ * Never exits non-zero: reporting must not be the thing that fails a run.
  */
 const fs = require('fs');
 const https = require('https');
 
-const MAX_LISTED_FAILURES = 15;
+// Long enough to be useful, short enough that the channel stays readable.
+const MAX_LISTED_SPECS = 20;
 
 /** Flatten Playwright's nested suites into one status per test. */
 function summarise(report) {
-  const counts = { passed: 0, failed: 0, skipped: 0 };
+  const counts = { passed: 0, failed: 0, skipped: 0, total: 0 };
   const failures = [];
 
-  const walk = (suite, trail) => {
+  const walk = (suite, trail, file) => {
+    const suiteFile = suite.file || file;
     for (const spec of suite.specs || []) {
       const title = [...trail, spec.title].filter(Boolean).join(' > ');
       for (const test of spec.tests || []) {
-        // A test that passed on retry is a pass; anything else that ran and
-        // did not pass is a failure, so flaky runs are not silently green.
-        const status =
-          test.status === 'skipped'
-            ? 'skipped'
-            : (test.results || []).some((r) => r.status === 'passed')
-              ? 'passed'
-              : 'failed';
-        counts[status] += 1;
-        if (status === 'failed') failures.push(title);
+        counts.total += 1;
+        const results = test.results || [];
+        // Passing on retry counts as a pass, matching how Playwright reports
+        // flakes. timedOut and interrupted are failures: a test that never
+        // finished has not demonstrated anything.
+        if (results.some((r) => r.status === 'passed')) {
+          counts.passed += 1;
+        } else if (results.some((r) => ['failed', 'timedOut', 'interrupted'].includes(r.status))) {
+          counts.failed += 1;
+          failures.push({ file: spec.file || suiteFile || '', title });
+        } else {
+          counts.skipped += 1;
+        }
       }
     }
-    for (const child of suite.suites || []) walk(child, [...trail, child.title]);
+    for (const child of suite.suites || []) {
+      walk(child, [...trail, child.title].filter(Boolean), suiteFile);
+    }
   };
 
-  for (const suite of report.suites || []) walk(suite, [suite.title]);
+  for (const suite of report.suites || []) walk(suite, [], suite.file || suite.title || '');
   return { counts, failures };
 }
 
-function buildMessage(report, suiteResult, buildUrl) {
-  const lines = [];
+/**
+ * A short label for the spec a failure came from. Ticket specs get their
+ * ticket number; the rest get section/page, which is how these screens are
+ * referred to in review anyway.
+ */
+function tagFor(file) {
+  const normalised = (file || '').replace(/\\/g, '/');
+  const base = normalised.split('/').pop().replace(/\.spec\.(ts|js)$/i, '');
 
-  if (!report) {
-    // No results file means the run died before reporting. Say that, rather
-    // than reporting zero failures, which reads as a pass.
-    lines.push(
-      `PrimeroEdge POS run ${suiteResult || 'finished'} before any results were published.`,
-    );
-  } else {
-    const { counts, failures } = summarise(report);
-    const ran = counts.passed + counts.failed;
+  const ticket = base.match(/^t-?(\d+)$/i);
+  if (ticket) return `T-${ticket[1]}`;
 
-    if (counts.failed === 0) {
-      lines.push(`PrimeroEdge POS: all ${counts.passed} passed (${counts.skipped} skipped).`);
-    } else {
-      lines.push(
-        `PrimeroEdge POS: ${counts.failed} failed of ${ran} (${counts.skipped} skipped).`,
-        '',
-      );
-      for (const failure of failures.slice(0, MAX_LISTED_FAILURES)) lines.push(`- ${failure}`);
-      if (failures.length > MAX_LISTED_FAILURES) {
-        lines.push(`- ...and ${failures.length - MAX_LISTED_FAILURES} more`);
-      }
+  // tests/administration/reconciliation/reconciliation.spec.ts -> administration/reconciliation
+  const parts = normalised
+    .replace(/^.*?tests\//, '')
+    .split('/')
+    .filter(Boolean);
+  parts.pop(); // drop the file itself
+  if (parts.length && parts[parts.length - 1] === base) return parts.join('/');
+  return parts.length ? [...parts, base].join('/') : base || 'test';
+}
+
+function formatDuration(ms) {
+  const seconds = Math.round((ms || 0) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return `${minutes}m ${seconds % 60}s`;
+}
+
+/** Group failures by spec: one failure shows the tag alone, several list the titles. */
+function failedSection(failures) {
+  if (!failures.length) return '';
+
+  const order = [];
+  const byTag = new Map();
+  for (const failure of failures) {
+    const tag = tagFor(failure.file);
+    if (!byTag.has(tag)) {
+      byTag.set(tag, []);
+      order.push(tag);
     }
+    byTag.get(tag).push(failure.title);
   }
 
-  if (buildUrl) lines.push('', buildUrl);
-  return lines.join('\n');
+  const lines = [];
+  for (const tag of order.slice(0, MAX_LISTED_SPECS)) {
+    const titles = byTag.get(tag);
+    if (titles.length === 1) {
+      lines.push(`• ${tag}`);
+    } else {
+      lines.push(`• ${tag}:`);
+      for (const title of titles) lines.push(`    - ${title}`);
+    }
+  }
+  if (order.length > MAX_LISTED_SPECS) {
+    lines.push(`• ...and ${order.length - MAX_LISTED_SPECS} more specs`);
+  }
+
+  return `\n\nFailed Tests:\n${lines.join('\n')}`;
+}
+
+/** The heads-up posted when the run begins, so a silent night is visibly a
+ *  missing message rather than an assumed pass. */
+function buildStartedMessage(links) {
+  const label = process.env.RUN_LABEL || 'Automation';
+  return `PrimeroEdge POS ${label} started.\n\nMonitor: ${links.pipelineUrl}`;
+}
+
+function buildMessage(report, suiteResult, links) {
+  const label = process.env.RUN_LABEL || 'Automation';
+  const { pipelineUrl, resultsUrl } = links;
+
+  // No results means the run died before reporting. Say so, rather than
+  // reporting zero failures, which reads as a pass. That silence is what hid
+  // the K12 timeout.
+  if (!report) {
+    const how = /^cancell?ed$/.test(suiteResult) ? 'was canceled' : 'ended';
+    return `PrimeroEdge POS ${label} ${how} before test results were published.\n\nPipeline: ${pipelineUrl}`;
+  }
+
+  const { counts, failures } = summarise(report);
+  if (counts.total === 0) {
+    return `PrimeroEdge POS ${label} ended before any tests ran.\n\nPipeline: ${pipelineUrl}`;
+  }
+
+  const pct = (n) => Math.round((n / counts.total) * 100);
+  const duration = formatDuration(report.stats && report.stats.duration);
+
+  return (
+    `PrimeroEdge POS ${label} completed. See results below.\n\n` +
+    `✅ ${'Passed:'.padEnd(10)}${counts.passed} (${pct(counts.passed)}%)\n` +
+    `❌ ${'Failed:'.padEnd(10)}${counts.failed} (${pct(counts.failed)}%)\n` +
+    `⏭ ${'Skipped:'.padEnd(10)}${counts.skipped} (${pct(counts.skipped)}%)\n` +
+    `📊 ${'Total:'.padEnd(10)}${counts.total}\n` +
+    `⏱ ${'Duration:'.padEnd(10)}${duration}` +
+    failedSection(failures) +
+    `\n\nResults: ${resultsUrl}`
+  );
 }
 
 function post(webhook, text) {
@@ -90,13 +168,13 @@ function post(webhook, text) {
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
       },
       (res) => {
-        console.log(`webhook responded ${res.statusCode}`);
+        console.log(`Webhook sent, status: ${res.statusCode}`);
         res.resume();
         res.on('end', resolve);
       },
     );
     req.on('error', (e) => {
-      console.log(`webhook failed: ${e.message}`);
+      console.log(`Webhook error: ${e.message}`);
       resolve();
     });
     req.end(body);
@@ -106,28 +184,44 @@ function post(webhook, text) {
 (async () => {
   const webhook = process.env.RINGCENTRAL_WEBHOOK_URL;
   if (!webhook) {
-    console.log('RINGCENTRAL_WEBHOOK_URL is not set - skipping the notification.');
+    console.log('No webhook URL; skipping.');
+    return;
+  }
+
+  // The project name carries a space ("PrimeroEdge Classic"), so it has to be
+  // encoded or the link breaks where the chat client stops parsing the URL.
+  const pipelineUrl =
+    `${process.env.COLLECTION_URI || ''}${encodeURIComponent(process.env.TEAM_PROJECT || '')}` +
+    `/_build/results?buildId=${process.env.BUILD_ID || ''}`;
+  const resultsUrl = `${pipelineUrl}&view=ms.vss-test-web.build-test-results-tab`;
+  const links = { pipelineUrl, resultsUrl };
+
+  // Both messages go through this script rather than a curl in the YAML: the
+  // payload needs embedded newlines, and getting those through YAML into a
+  // shell string intact is a reliable way to post malformed JSON.
+  if (process.argv.includes('--started')) {
+    const started = buildStartedMessage(links);
+    console.log('Sending webhook:', started);
+    await post(webhook, started);
     return;
   }
 
   const resultsPath = process.env.RESULTS_JSON || 'test-results/results.json';
   let report = null;
-  try {
-    report = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
-  } catch (e) {
-    console.log(`could not read ${resultsPath}: ${e.message}`);
+  if (fs.existsSync(resultsPath)) {
+    try {
+      report = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
+    } catch (e) {
+      console.log(`Could not parse ${resultsPath}: ${e.message}`);
+    }
+  } else {
+    console.log(`No results at ${resultsPath}.`);
   }
 
-  const text = buildMessage(
-    report,
-    (process.env.SUITE_RESULT || '').toLowerCase(),
-    process.env.BUILD_URL,
-  );
-  console.log('--- message ---');
-  console.log(text);
-  console.log('---------------');
+  const text = buildMessage(report, (process.env.SUITE_RESULT || '').toLowerCase(), links);
+  console.log('Sending webhook:', text);
   await post(webhook, text);
 })().catch((e) => {
-  // Deliberately swallowed: reporting must never be the thing that fails a run.
-  console.log(`notification failed: ${e.message}`);
+  // Deliberately swallowed, for the same reason the script never exits non-zero.
+  console.log(`Notification failed: ${e.message}`);
 });
