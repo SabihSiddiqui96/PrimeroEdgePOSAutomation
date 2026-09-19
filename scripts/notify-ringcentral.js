@@ -65,7 +65,10 @@ function summarise(report) {
  */
 function tagFor(file) {
   const normalised = (file || '').replace(/\\/g, '/');
-  const base = normalised.split('/').pop().replace(/\.spec\.(ts|js)$/i, '');
+  const base = normalised
+    .split('/')
+    .pop()
+    .replace(/\.spec\.(ts|js)$/i, '');
 
   const ticket = base.match(/^t-?(\d+)$/i);
   if (ticket) return `T-${ticket[1]}`;
