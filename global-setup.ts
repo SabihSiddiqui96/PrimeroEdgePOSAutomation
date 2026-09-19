@@ -35,7 +35,15 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   // chromium here asked for a download that is not there, and the whole run
   // died in global setup before a single test started.
   const browser = await chromium.launch({ channel: process.env.CI ? 'chrome' : undefined });
-  const context = await browser.newContext({ baseURL: getBaseUrl() });
+  // ignoreHTTPSErrors has to be repeated here. playwright.config.ts sets it
+  // under `use`, which only reaches contexts the test runner builds - this one
+  // is ours, so it started strict and the login precheck failed on a hosted
+  // agent with "unable to verify the first certificate". QA serves only its
+  // leaf certificate; see the note on the reachability gate in the pipeline.
+  const context = await browser.newContext({
+    baseURL: getBaseUrl(),
+    ignoreHTTPSErrors: true,
+  });
   const page = await context.newPage();
 
   try {
