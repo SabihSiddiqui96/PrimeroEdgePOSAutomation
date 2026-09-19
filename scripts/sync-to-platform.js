@@ -201,6 +201,9 @@ const EXCLUDE = new Set([
   // from GitHub. A copy inside the monorepo would be a second definition of
   // the same build that nobody runs.
   'azure-pipelines.yml',
+  // Only ever called by that pipeline, and it posts to a RingCentral channel
+  // owned by this team. Dead weight in the monorepo.
+  'scripts/notify-ringcentral.js',
   // Repo furniture that belongs to this repo, not to a folder inside someone
   // else's monorepo. A nested .gitignore would quietly change what the platform
   // repo ignores under this path, and the rest is documentation and formatting

@@ -70,26 +70,56 @@ stages:
 
           # Gate on QA actually answering. Running the suite against a dead host
           # reports every test as failed, which reads as a regression rather
-          # than an outage. Retried, because a single curl turns a momentary TLS
+          # than an outage. Retried, because a single curl turns a momentary
           # blip into a lost night's run.
+          #
+          # -k is deliberate. QA serves only its leaf certificate and omits the
+          # GoDaddy G2 intermediate; Windows and Chrome fetch the missing link
+          # themselves, Ubuntu's curl does not, so a strict check fails with
+          # exit 60 on a hosted agent while passing on a laptop. That cost build
+          # 561750 here and 561334 on K12. The suite itself runs with
+          # ignoreHTTPSErrors, so a gate that is stricter than the tests it
+          # guards only ever produces false outages.
           - script: |
               set +e
               url="$(BASE_URL)$(LOGIN_PATH)"
               echo "Checking QA login reachability: $url"
               for attempt in 1 2 3 4 5; do
-                curl -sS -o /dev/null -I --location --max-time 30 -w 'HTTP %{http_code}' "$url"
+                curl -sSk -o /dev/null -I --location --max-time 30 -w 'HTTP %{http_code}' "$url"
                 rc=$?   # capture before anything else runs, echo included
                 echo
                 if [ $rc -eq 0 ]; then
                   echo "reachable on attempt $attempt"
                   exit 0
                 fi
-                echo "attempt $attempt failed: curl exit $rc (60=TLS, 28=timeout, 6=DNS, 7=refused)"
+                echo "attempt $attempt failed: curl exit $rc (28=timeout, 6=DNS, 7=refused)"
                 [ $attempt -lt 5 ] && sleep 20
               done
               echo "##vso[task.logissue type=error]$url unreachable after 5 attempts (last curl exit $rc)"
               exit 1
             displayName: Check QA login reachability
+
+
+          # Heads-up that the run has begun, so a silent night is visibly a
+          # missing message rather than an assumed pass. Non-fatal by design:
+          # a webhook outage must not fail the suite, and an unset
+          # RINGCENTRAL_WEBHOOK_URL simply skips the ping.
+          - script: |
+              if [ -z "$RINGCENTRAL_WEBHOOK_URL" ]; then
+                echo "RINGCENTRAL_WEBHOOK_URL is not set - skipping the ping."
+                exit 0
+              fi
+              payload=$(printf '{"text":"PrimeroEdge POS %s started.\n\n%s"}' "$RUN_LABEL" "$BUILD_URL")
+              curl -sS -X POST "$RINGCENTRAL_WEBHOOK_URL" \
+                -H 'Content-Type: application/json' \
+                -d "$payload" || true
+              echo
+            displayName: Notify RingCentral - started
+            env:
+              RINGCENTRAL_WEBHOOK_URL: $(RINGCENTRAL_WEBHOOK_URL)
+              RUN_LABEL: $(RUN_LABEL)
+              BUILD_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+
 
           - script: npx playwright test --workers=1
             displayName: Run the POS suite
@@ -135,3 +165,41 @@ stages:
               targetPath: test-results
               artifact: playwright-test-results
               publishLocation: pipeline
+
+  - stage: Notify
+    displayName: Report the result to RingCentral
+    dependsOn: Run_Playwright
+    # always(), so a failed or cancelled suite still gets reported. Silence is
+    # the one outcome nobody notices.
+    condition: always()
+    variables:
+      SUITE_RESULT: $[ stageDependencies.Run_Playwright.PlaywrightTests.result ]
+    jobs:
+      - job: SendWebhook
+        displayName: Post the summary
+        steps:
+          # The repo is needed for scripts/notify-ringcentral.js, but not npm
+          # packages: the script is plain Node with no dependencies.
+          - checkout: self
+
+          - task: NodeTool@0
+            displayName: Install Node.js
+            inputs:
+              versionSpec: $(NODE_VERSION)
+
+          # continueOnError, because a run that died before publishing has no
+          # artifact to download, and that case is exactly the one worth
+          # reporting. The script handles the missing file.
+          - task: DownloadPipelineArtifact@2
+            displayName: Download the test results
+            continueOnError: true
+            inputs:
+              artifact: playwright-test-results
+              path: $(Build.SourcesDirectory)/test-results
+
+          - script: node scripts/notify-ringcentral.js
+            displayName: Post the summary to RingCentral
+            env:
+              RINGCENTRAL_WEBHOOK_URL: $(RINGCENTRAL_WEBHOOK_URL)
+              SUITE_RESULT: $(SUITE_RESULT)
+              BUILD_URL: $(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
