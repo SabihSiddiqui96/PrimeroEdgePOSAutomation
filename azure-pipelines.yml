@@ -1,0 +1,137 @@
+# Nightly Playwright run for the PrimeroEdge POS suite.
+#
+# No CI trigger: this runs on the schedule below, or when started by hand from
+# Azure DevOps. Pushing to main does not kick off a run — the suite talks to a
+# live QA box and a run per commit would be noise.
+trigger: none
+pr: none
+
+# Cron is UTC. 08:00 UTC is 03:00 US Central while daylight saving is on and
+# 02:00 once it ends — close enough for a nightly, and it stays well clear of
+# the working day either way.
+schedules:
+  - cron: '0 8 * * 1-5'
+    displayName: Nightly QA run (weekday mornings, US Central)
+    branches:
+      include:
+        - main
+    # Run even when nothing was committed: the point is to catch QA drifting,
+    # not to test our own changes.
+    always: true
+
+parameters:
+  - name: targetEnv
+    displayName: Target environment
+    type: string
+    default: QA
+    values:
+      - QA
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: NODE_VERSION
+    value: 20.x
+  # Owned by the YAML rather than a pipeline variable, so the environment the
+  # suite hits is visible in the file and in the diff when it changes.
+  - name: BASE_URL
+    value: https://qa.primeroedge.co
+  - name: LOGIN_PATH
+    value: /login.aspx
+  - name: RUN_LABEL
+    value: POS QA
+
+stages:
+  - stage: Run_Playwright
+    displayName: Run the POS suite on ${{ parameters.targetEnv }}
+    jobs:
+      - job: PlaywrightTests
+        displayName: Playwright POS suite
+        # The suite runs in about four minutes today and grows a section at a
+        # time. 60 leaves plenty of headroom; a run that hits the cap is
+        # cancelled and publishes no results at all, which is worse than a
+        # failure because there is nothing to read afterwards.
+        timeoutInMinutes: 60
+        steps:
+          - checkout: self
+
+          - task: NodeTool@0
+            displayName: Install Node.js
+            inputs:
+              versionSpec: $(NODE_VERSION)
+
+          - script: npm ci
+            displayName: Install npm packages
+
+          # playwright.config.ts uses the real Chrome channel under CI.
+          - script: npx playwright install --with-deps chrome
+            displayName: Install Playwright browsers
+
+          # Gate on QA actually answering. Running the suite against a dead host
+          # reports every test as failed, which reads as a regression rather
+          # than an outage. Retried, because a single curl turns a momentary TLS
+          # blip into a lost night's run.
+          - script: |
+              set +e
+              url="$(BASE_URL)$(LOGIN_PATH)"
+              echo "Checking QA login reachability: $url"
+              for attempt in 1 2 3 4 5; do
+                curl -sS -o /dev/null -I --location --max-time 30 -w 'HTTP %{http_code}' "$url"
+                rc=$?   # capture before anything else runs, echo included
+                echo
+                if [ $rc -eq 0 ]; then
+                  echo "reachable on attempt $attempt"
+                  exit 0
+                fi
+                echo "attempt $attempt failed: curl exit $rc (60=TLS, 28=timeout, 6=DNS, 7=refused)"
+                [ $attempt -lt 5 ] && sleep 20
+              done
+              echo "##vso[task.logissue type=error]$url unreachable after 5 attempts (last curl exit $rc)"
+              exit 1
+            displayName: Check QA login reachability
+
+          - script: npx playwright test --workers=1
+            displayName: Run the POS suite
+            env:
+              CI: true
+              BASE_URL: $(BASE_URL)
+              LOGIN_PATH: $(LOGIN_PATH)
+              # Credentials and district come from pipeline variables. The
+              # password is stored encrypted and decrypted by utils/crypto.ts,
+              # so ENCRYPTION_KEY has to travel with it.
+              PE_USERNAME: $(PE_USERNAME)
+              ENCRYPTED_PASSWORD: $(ENCRYPTED_PASSWORD)
+              ENCRYPTION_KEY: $(ENCRYPTION_KEY)
+              DISTRICT_NAME: $(DISTRICT_NAME)
+
+          # PublishTestResults fails the task when the folders are missing, and
+          # they are missing when the run dies early.
+          - script: mkdir -p playwright-report test-results
+            displayName: Ensure report folders exist
+            condition: succeededOrFailed()
+
+          - task: PublishTestResults@2
+            displayName: Publish JUnit test results
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: test-results/results.xml
+              failTaskOnFailedTests: true
+              testRunTitle: POS $(RUN_LABEL)
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish Playwright HTML report
+            condition: succeededOrFailed()
+            inputs:
+              targetPath: playwright-report
+              artifact: playwright-report
+              publishLocation: pipeline
+
+          - task: PublishPipelineArtifact@1
+            displayName: Publish test artifacts
+            condition: succeededOrFailed()
+            inputs:
+              targetPath: test-results
+              artifact: playwright-test-results
+              publishLocation: pipeline

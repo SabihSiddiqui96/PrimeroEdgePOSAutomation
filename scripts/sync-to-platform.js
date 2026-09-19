@@ -197,6 +197,10 @@ const EXCLUDE = new Set([
   // House rules for working in this repo - ticket conventions, hour logging,
   // how to reach the tracker. Useful here, noise in a shared monorepo.
   'CLAUDE.md',
+  // The nightly pipeline belongs to this repo's own ADO pipeline, which builds
+  // from GitHub. A copy inside the monorepo would be a second definition of
+  // the same build that nobody runs.
+  'azure-pipelines.yml',
   // Repo furniture that belongs to this repo, not to a folder inside someone
   // else's monorepo. A nested .gitignore would quietly change what the platform
   // repo ignores under this path, and the rest is documentation and formatting
