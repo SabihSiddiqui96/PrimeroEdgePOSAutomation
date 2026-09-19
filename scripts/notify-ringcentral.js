@@ -184,12 +184,45 @@ function post(webhook, text) {
   });
 }
 
-(async () => {
-  const webhook = process.env.RINGCENTRAL_WEBHOOK_URL;
-  if (!webhook) {
+/**
+ * The webhook, or null when it is not usable.
+ *
+ * An undefined pipeline variable is not empty: Azure DevOps leaves the macro
+ * in place, so the value arrives as the literal "$(RINGCENTRAL_WEBHOOK_URL)".
+ * That is truthy, so a plain falsy check waves it through and the run fails
+ * later with a bare "Invalid URL" that says nothing about the cause. Never
+ * log the value itself - it is a bearer credential.
+ */
+function resolveWebhook() {
+  const raw = (process.env.RINGCENTRAL_WEBHOOK_URL || '').trim();
+  if (!raw) {
     console.log('No webhook URL; skipping.');
-    return;
+    return null;
   }
+  if (/^\$\(.*\)$/.test(raw)) {
+    console.log(
+      'RINGCENTRAL_WEBHOOK_URL is not defined on this pipeline - the macro came ' +
+        'through unexpanded. Add it under Edit > Variables. Skipping.',
+    );
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    console.log('RINGCENTRAL_WEBHOOK_URL is not a valid URL; skipping.');
+    return null;
+  }
+  if (parsed.protocol !== 'https:') {
+    console.log(`RINGCENTRAL_WEBHOOK_URL is ${parsed.protocol}, expected https; skipping.`);
+    return null;
+  }
+  return raw;
+}
+
+(async () => {
+  const webhook = resolveWebhook();
+  if (!webhook) return;
 
   // The project name carries a space ("PrimeroEdge Classic"), so it has to be
   // encoded or the link breaks where the chat client stops parsing the URL.

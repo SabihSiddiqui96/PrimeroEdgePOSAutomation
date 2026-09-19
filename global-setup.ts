@@ -30,7 +30,11 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
 
   if (!needAuth) return;
 
-  const browser = await chromium.launch();
+  // Same browser the tests themselves use. Under CI that is the Chrome
+  // channel, which is the only one the agent installs - launching bare
+  // chromium here asked for a download that is not there, and the whole run
+  // died in global setup before a single test started.
+  const browser = await chromium.launch({ channel: process.env.CI ? 'chrome' : undefined });
   const context = await browser.newContext({ baseURL: getBaseUrl() });
   const page = await context.newPage();
 
