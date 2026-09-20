@@ -170,25 +170,10 @@ that have not been run.
 
 ---
 
-## Unwritten sections are `*.todo.spec.ts`
-
-A screen with no spec yet gets a skeleton file named `<page>.todo.spec.ts`, and
-`testIgnore` in `playwright.config.ts` keeps every one of them out of the run.
-They exist to keep the backlog visible in the tree — they are **not results**.
-
-**Rename the file to plain `.spec.ts` in the same commit that writes the real
-specs.** That one rename is what puts the section into the run, the totals and
-the nightly's RingCentral message.
-
-Never leave a placeholder in a plain `.spec.ts`. 39 of them once reported as
-"skipped" and turned a clean run into a meaningless "58% passed", hiding the
-fact that all 54 real tests were green. The totals only mean something if they
-count shipped work and nothing else.
-
 ## Known QA gaps
 
-Four POS pages answer with an Internal Server Error on QA, so they are still
-`.todo.spec.ts` — their specs cannot be written until the pages are fixed:
+Four POS pages answer with an Internal Server Error on QA, so their specs are
+`test.fixme` until the pages are fixed:
 
 - Administration > Serving Exceptions — `/POS/DuplicateMeal.aspx`
 - Daily Reports > Duplicate Meals — `/POS/DuplicateMealsReport.aspx`

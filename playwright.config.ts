@@ -25,12 +25,6 @@ import { browserChannel, IGNORE_HTTPS_ERRORS } from './utils/browserEnv';
 
 export default defineConfig({
   testDir: './tests',
-  // Skeletons for sections nobody has written yet are named *.todo.spec.ts and
-  // never run. They exist to keep the backlog visible in the tree, and they are
-  // not results: 39 of them reporting as "skipped" put the 54 real tests behind
-  // a 58% pass rate that meant nothing. Rename a file to plain .spec.ts when the
-  // section is actually written, and it joins the run and the totals.
-  testIgnore: '**/*.todo.spec.ts',
   globalSetup: './global-setup.ts',
   timeout: positiveIntFromEnv('TEST_TIMEOUT_MS', process.env.CI ? 180000 : 90000),
   expect: {

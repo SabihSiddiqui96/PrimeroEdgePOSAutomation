@@ -24,7 +24,14 @@ const https = require('https');
 // Long enough to be useful, short enough that the channel stays readable.
 const MAX_LISTED_SPECS = 20;
 
-/** Flatten Playwright's nested suites into one status per test. */
+/**
+ * Flatten Playwright's nested suites into one status per test.
+ *
+ * Skipped tests are counted but deliberately left out of the total. Most of
+ * them are placeholder files for screens nobody has automated yet, and letting
+ * them into the denominator reported a fully green suite as "58% passed". The
+ * message is about what is live, so the total is what actually ran.
+ */
 function summarise(report) {
   const counts = { passed: 0, failed: 0, skipped: 0, total: 0 };
   const failures = [];
@@ -34,15 +41,16 @@ function summarise(report) {
     for (const spec of suite.specs || []) {
       const title = [...trail, spec.title].filter(Boolean).join(' > ');
       for (const test of spec.tests || []) {
-        counts.total += 1;
         const results = test.results || [];
         // Passing on retry counts as a pass, matching how Playwright reports
         // flakes. timedOut and interrupted are failures: a test that never
         // finished has not demonstrated anything.
         if (results.some((r) => r.status === 'passed')) {
           counts.passed += 1;
+          counts.total += 1;
         } else if (results.some((r) => ['failed', 'timedOut', 'interrupted'].includes(r.status))) {
           counts.failed += 1;
+          counts.total += 1;
           failures.push({ file: spec.file || suiteFile || '', title });
         } else {
           counts.skipped += 1;
@@ -155,12 +163,9 @@ function buildMessage(report, suiteResult, links) {
     `✅ ${'Passed:'.padEnd(10)}${counts.passed} (${pct(counts.passed)}%)`,
     `❌ ${'Failed:'.padEnd(10)}${counts.failed} (${pct(counts.failed)}%)`,
   ];
-  // Unwritten sections are *.todo.spec.ts and never reach the run, so a skip
-  // is now a real event worth naming. A standing "Skipped: 0" line would just
-  // be furniture nobody reads.
-  if (counts.skipped > 0) {
-    lines.push(`⏭ ${'Skipped:'.padEnd(10)}${counts.skipped} (${pct(counts.skipped)}%)`);
-  }
+  // No skipped line. The skips are screens nobody has automated yet, and
+  // reporting a backlog count next to the results only invites the question
+  // of why a passing run is not at 100%.
   lines.push(`📊 ${'Total:'.padEnd(10)}${counts.total}`, `⏱ ${'Duration:'.padEnd(10)}${duration}`);
 
   return lines.join('\n') + failedSection(failures) + `\n\nResults: ${resultsUrl}`;
