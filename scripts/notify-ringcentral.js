@@ -149,16 +149,21 @@ function buildMessage(report, suiteResult, links) {
   const pct = (n) => Math.round((n / counts.total) * 100);
   const duration = formatDuration(report.stats && report.stats.duration);
 
-  return (
-    `PrimeroEdge POS ${label} completed. See results below.\n\n` +
-    `✅ ${'Passed:'.padEnd(10)}${counts.passed} (${pct(counts.passed)}%)\n` +
-    `❌ ${'Failed:'.padEnd(10)}${counts.failed} (${pct(counts.failed)}%)\n` +
-    `⏭ ${'Skipped:'.padEnd(10)}${counts.skipped} (${pct(counts.skipped)}%)\n` +
-    `📊 ${'Total:'.padEnd(10)}${counts.total}\n` +
-    `⏱ ${'Duration:'.padEnd(10)}${duration}` +
-    failedSection(failures) +
-    `\n\nResults: ${resultsUrl}`
-  );
+  const lines = [
+    `PrimeroEdge POS ${label} completed. See results below.`,
+    '',
+    `✅ ${'Passed:'.padEnd(10)}${counts.passed} (${pct(counts.passed)}%)`,
+    `❌ ${'Failed:'.padEnd(10)}${counts.failed} (${pct(counts.failed)}%)`,
+  ];
+  // Unwritten sections are *.todo.spec.ts and never reach the run, so a skip
+  // is now a real event worth naming. A standing "Skipped: 0" line would just
+  // be furniture nobody reads.
+  if (counts.skipped > 0) {
+    lines.push(`⏭ ${'Skipped:'.padEnd(10)}${counts.skipped} (${pct(counts.skipped)}%)`);
+  }
+  lines.push(`📊 ${'Total:'.padEnd(10)}${counts.total}`, `⏱ ${'Duration:'.padEnd(10)}${duration}`);
+
+  return lines.join('\n') + failedSection(failures) + `\n\nResults: ${resultsUrl}`;
 }
 
 function post(webhook, text) {

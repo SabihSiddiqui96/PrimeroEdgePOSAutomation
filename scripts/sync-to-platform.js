@@ -36,17 +36,14 @@ const SOURCE = path.resolve(__dirname, '..');
 const TARGET_REPO = 'C:\\Users\\sabih.siddiqui\\Desktop\\Automation\\Cybersoft.Platform';
 const PREFIX = 'Cybersoft.Platform.TestAutomation/PrimeroEdgePOSAutomation';
 const BRANCH = 'AutomationProjects';
-const REMOTE_PATH =
-  'dev.azure.com/Cybersoft-Technologies-Inc/Platform/_git/Cybersoft.Platform';
+const REMOTE_PATH = 'dev.azure.com/Cybersoft-Technologies-Inc/Platform/_git/Cybersoft.Platform';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const noPush = args.includes('--no-push');
 const msgIndex = args.findIndex((a) => a === '-m' || a === '--message');
 const commitMessage =
-  msgIndex !== -1 && args[msgIndex + 1]
-    ? args[msgIndex + 1]
-    : 'Update PrimeroEdge POS automation';
+  msgIndex !== -1 && args[msgIndex + 1] ? args[msgIndex + 1] : 'Update PrimeroEdge POS automation';
 
 // The mirror never lands on BRANCH itself. BRANCH is shared company code that
 // other people build from, so every sync cuts its own branch off it and stops
@@ -214,11 +211,28 @@ const EXCLUDE = new Set([
   'README.md',
 ]);
 
-if (EXCLUDE.size) {
-  const dropped = sourceFiles.filter((f) => EXCLUDE.has(f));
-  if (dropped.length) console.log(`Not mirrored (excluded): ${dropped.join(', ')}`);
-}
-sourceFiles = sourceFiles.filter((f) => !EXCLUDE.has(f));
+// Whole classes of file, where naming each one would rot.
+//
+// Note this does NOT follow the leave-it-alone rule above, and the difference
+// is deliberate. EXCLUDE covers files that belong to this repo and were never
+// the monorepo's business, so removing them from it would be a bigger action
+// than the exclusion asks for. These are the opposite case: the backlog
+// skeletons are already mirrored, and getting them out is the entire point.
+// Applying the patterns to the source side only lets the removal fall out of
+// the normal stale check, which is why the target filter below still uses the
+// exact-path set.
+const EXCLUDE_PATTERNS = [
+  // Placeholders for sections nobody has written yet. They never run (see
+  // testIgnore in playwright.config.ts) and they are not work, so they have no
+  // business in a slice PR someone has to review.
+  /\.todo\.spec\.ts$/,
+];
+
+const isExcluded = (f) => EXCLUDE.has(f) || EXCLUDE_PATTERNS.some((p) => p.test(f));
+
+const dropped = sourceFiles.filter(isExcluded);
+if (dropped.length) console.log(`Not mirrored (excluded): ${dropped.join(', ')}`);
+sourceFiles = sourceFiles.filter((f) => !isExcluded(f));
 
 const targetFiles = git(TARGET_REPO, ['ls-files', PREFIX])
   .split('\n')

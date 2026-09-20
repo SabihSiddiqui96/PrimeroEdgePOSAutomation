@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getBaseUrl } from './utils/baseUrl';
 import { getAuthMetaPath, getAuthStoragePath } from './utils/authStorage';
+import { browserChannel, IGNORE_HTTPS_ERRORS } from './utils/browserEnv';
 import { loginToPrimeroEdge } from './utils/pos';
 
 dotenv.config({ path: process.env.ENV_FILE?.trim() || '.env' });
@@ -30,19 +31,13 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
 
   if (!needAuth) return;
 
-  // Same browser the tests themselves use. Under CI that is the Chrome
-  // channel, which is the only one the agent installs - launching bare
-  // chromium here asked for a download that is not there, and the whole run
-  // died in global setup before a single test started.
-  const browser = await chromium.launch({ channel: process.env.CI ? 'chrome' : undefined });
-  // ignoreHTTPSErrors has to be repeated here. playwright.config.ts sets it
-  // under `use`, which only reaches contexts the test runner builds - this one
-  // is ours, so it started strict and the login precheck failed on a hosted
-  // agent with "unable to verify the first certificate". QA serves only its
-  // leaf certificate; see the note on the reachability gate in the pipeline.
+  // This browser and context are ours, not the runner's, so nothing in the
+  // config's `use` block reaches them - both settings have to be applied here
+  // by hand. utils/browserEnv.ts is the single place either is decided.
+  const browser = await chromium.launch({ channel: browserChannel() });
   const context = await browser.newContext({
     baseURL: getBaseUrl(),
-    ignoreHTTPSErrors: true,
+    ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS,
   });
   const page = await context.newPage();
 
