@@ -137,21 +137,48 @@ function buildStartedMessage(links) {
   return `PrimeroEdge POS ${label} started.\n\nMonitor: ${links.pipelineUrl}`;
 }
 
+/**
+ * The reason a run died before testing, when Playwright recorded one.
+ *
+ * A globalSetup failure lands in the report's top-level errors rather than in
+ * any test, so without this the message can only say that nothing ran - which
+ * reads like a quiet night instead of a broken one. The full stack stays in
+ * the build log; one line is enough to tell QA being down from a real bug.
+ */
+function firstError(report) {
+  const raw = (report.errors || []).map((e) => e && (e.message || e.value)).find(Boolean);
+  if (!raw) return '';
+  const line = raw
+    .replace(/\[[0-9;]*m/g, '') // reporter colour codes
+    .split('\n')
+    .map((s) => s.trim())
+    .find(Boolean);
+  if (!line) return '';
+  return line.length > 300 ? `${line.slice(0, 300)}…` : line;
+}
+
 function buildMessage(report, suiteResult, links) {
   const label = process.env.RUN_LABEL || 'Automation';
   const { pipelineUrl, resultsUrl } = links;
+  // "ended" is too soft for either case below: both mean a broken run, and a
+  // message nobody reads as a problem is the same as no message.
+  const how = /^cancell?ed$/.test(suiteResult) ? 'was canceled' : 'failed';
 
-  // No results means the run died before reporting. Say so, rather than
+  // No results at all means the run died before reporting. Say so, rather than
   // reporting zero failures, which reads as a pass. That silence is what hid
   // the K12 timeout.
   if (!report) {
-    const how = /^cancell?ed$/.test(suiteResult) ? 'was canceled' : 'ended';
     return `PrimeroEdge POS ${label} ${how} before test results were published.\n\nPipeline: ${pipelineUrl}`;
   }
 
   const { counts, failures } = summarise(report);
   if (counts.total === 0) {
-    return `PrimeroEdge POS ${label} ended before any tests ran.\n\nPipeline: ${pipelineUrl}`;
+    const reason = firstError(report);
+    return (
+      `PrimeroEdge POS ${label} ${how} before any tests ran.` +
+      (reason ? `\n\n${reason}` : '') +
+      `\n\nPipeline: ${pipelineUrl}`
+    );
   }
 
   const pct = (n) => Math.round((n / counts.total) * 100);

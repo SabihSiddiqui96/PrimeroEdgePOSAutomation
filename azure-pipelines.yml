@@ -85,17 +85,20 @@ stages:
               url="$(BASE_URL)$(LOGIN_PATH)"
               echo "Checking QA login reachability: $url"
               for attempt in 1 2 3 4 5; do
-                curl -sSk -o /dev/null -I --location --max-time 30 -w 'HTTP %{http_code}' "$url"
-                rc=$?   # capture before anything else runs, echo included
-                echo
-                if [ $rc -eq 0 ]; then
+                code=$(curl -sSk -o /dev/null -L --max-time 30 -w '%{http_code}' "$url")
+                rc=$?
+                echo "attempt $attempt: curl exit $rc, HTTP $code (exit 28=timeout, 6=DNS, 7=refused)"
+                # Both halves matter. curl exits 0 on a 502 because the request
+                # itself succeeded and the server just answered badly, so testing
+                # the exit code alone called a dead QA "reachable" in under a
+                # second and let the suite spend four minutes failing to log in.
+                if [ $rc -eq 0 ] && [ "$code" = "200" ]; then
                   echo "reachable on attempt $attempt"
                   exit 0
                 fi
-                echo "attempt $attempt failed: curl exit $rc (28=timeout, 6=DNS, 7=refused)"
                 [ $attempt -lt 5 ] && sleep 20
               done
-              echo "##vso[task.logissue type=error]$url unreachable after 5 attempts (last curl exit $rc)"
+              echo "##vso[task.logissue type=error]$url is not serving the login page after 5 attempts (last: curl exit $rc, HTTP $code)"
               exit 1
             displayName: Check QA login reachability
 
