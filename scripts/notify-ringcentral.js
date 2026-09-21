@@ -165,10 +165,14 @@ function abortReason(report, suiteResult) {
   // place, and "$(ABORT_REASON)" posted to the channel would be worse than no
   // reason at all. RINGCENTRAL_WEBHOOK_URL already caught us out this way.
   const fromGate = /^\$\(.*\)$/.test(raw) ? '' : raw;
-  if (fromGate) return fromGate;
+  // The caller puts this mid-sentence, and a reason lifted from an exception
+  // brings its own full stop along - "... exceeded.." otherwise.
+  const tidy = (reason) => reason.replace(/\.+$/, '');
+
+  if (fromGate) return tidy(fromGate);
   if (/^cancell?ed$/.test(suiteResult)) return 'the run was canceled or hit its time limit';
   const err = report ? firstError(report) : '';
-  return err || 'an error before any tests ran';
+  return err ? tidy(err) : 'an error before any tests ran';
 }
 
 function buildMessage(report, suiteResult, links) {
