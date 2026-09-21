@@ -102,6 +102,10 @@ If any change touches
 create a new branch, push there, and have a reviewer create the CR. Never push
 directly to `main`/`master` on that ADO repo.
 
+**Prefix the PR title with the repo.** `SchoolCafe: `, `K12: `, `POS: `, `CafeTV: `
+then the change. The platform repo takes PRs from every automation project at once,
+so a title without the prefix makes a reviewer open it to find out whose it is.
+
 **Reviewers on every platform PR.**
 Required: **Venkata Pranitha Raj Kondaveeti**.
 Optional: **Haritha Manne**, **Jagadeesh Kumar Yadlapalli**, **Prasoona Nalajala**.
