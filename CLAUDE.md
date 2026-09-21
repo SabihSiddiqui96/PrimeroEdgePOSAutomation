@@ -132,7 +132,11 @@ The other three are optional on that PR — so Pranitha is optional on TV, and P
 is optional everywhere else. Haritha Manne and Jagadeesh Kumar Yadlapalli are always
 optional.
 
-**Branch names are camelCase** — no dashes, underscores or slashes.
+**Branch name carries the repo too, and matches the title.** camelCase, starting
+with the repo — no dashes, underscores or slashes. `schoolCafeLoginPreflight`,
+`k12FixTest`, `cafeTVHandleSetting`, `posMirrorCatchUp`. In this repo that means
+`pos...`. The branch and the PR title should read as the same change: title
+`POS: handle the login preflight` goes on branch `posLoginPreflight`.
 `posDailyReports`, `paginationFix`. The mirror script rejects anything else.
 
 **Mirroring with `scripts/sync-to-platform.js`, two traps.** It cuts the branch
@@ -263,3 +267,19 @@ in order. **Never jump ahead without the user's explicit "go".**
 1. Write `tests/tickets/t-<id>.spec.ts`.
 2. Run and verify until green.
 3. Commit and push to `main`/`master` on GitHub (see Git Push Rules above).
+
+---
+
+## Ticket comments
+
+**Every PR gets a ticket comment.** If a PR goes up, comment on this repo's task
+saying what the PR did. It does not have to be a test fix — pipeline work, tooling,
+notifications and cleanup all count. Sabih's manager reads the ticket to see what was
+done, so anything that reached a PR gets written down. No PR, no comment.
+
+This repo's task: **121073** — PrimeroEdge POS Module - Automation Testing
+https://dev.azure.com/Cybersoft-Technologies-Inc/PrimeroEdge%20Classic/_workitems/edit/121073
+
+Bump `Custom.ActualHours` (a string) in the same pass, and read the work item's
+`/updates` first — Sabih logs hours by hand, so only add if the period is not already
+covered, and say plainly if you skipped it.
