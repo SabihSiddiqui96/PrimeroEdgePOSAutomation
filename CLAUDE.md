@@ -112,9 +112,10 @@ script's EXCLUDE set are not drift.
 then the change. The platform repo takes PRs from every automation project at once,
 so a title without the prefix makes a reviewer open it to find out whose it is.
 
-**Reviewers on every platform PR.**
-Required: **Venkata Pranitha Raj Kondaveeti**.
-Optional: **Haritha Manne**, **Jagadeesh Kumar Yadlapalli**, **Prasoona Nalajala**.
+**Reviewers — the required one is per repo.** POS and K12: **Venkata Pranitha Raj
+Kondaveeti**. SchoolCafe and CafeTV/SCTV: **Prasoona Nalajala**. Everyone else on the
+list is optional. Check the repo's last merged platform PR if in doubt — do not reuse
+another repo's required reviewer.
 
 **Branch names are camelCase** — no dashes, underscores or slashes.
 `posDailyReports`, `paginationFix`. The mirror script rejects anything else.
