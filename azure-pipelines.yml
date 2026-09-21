@@ -96,10 +96,17 @@ stages:
                   echo "reachable on attempt $attempt"
                   exit 0
                 fi
+                if [ $rc -ne 0 ]; then
+                  reason="QA is unreachable (curl exit $rc)"
+                else
+                  reason="QA returned HTTP $code"
+                fi
                 [ $attempt -lt 5 ] && sleep 20
               done
+              echo "##vso[task.setvariable variable=abortReason;isOutput=true]$reason"
               echo "##vso[task.logissue type=error]$url is not serving the login page after 5 attempts (last: curl exit $rc, HTTP $code)"
               exit 1
+            name: loginCheck
             displayName: Check QA login reachability
 
 
@@ -170,6 +177,7 @@ stages:
     condition: always()
     variables:
       SUITE_RESULT: $[ stageDependencies.Run_Playwright.PlaywrightTests.result ]
+      ABORT_REASON: $[ stageDependencies.Run_Playwright.PlaywrightTests.outputs['loginCheck.abortReason'] ]
     jobs:
       - job: SendWebhook
         displayName: Post the summary
@@ -198,6 +206,7 @@ stages:
             env:
               RINGCENTRAL_WEBHOOK_URL: $(RINGCENTRAL_WEBHOOK_URL)
               SUITE_RESULT: $(SUITE_RESULT)
+              ABORT_REASON: $(ABORT_REASON)
               RUN_LABEL: $(RUN_LABEL)
               COLLECTION_URI: $(System.CollectionUri)
               TEAM_PROJECT: $(System.TeamProject)

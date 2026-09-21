@@ -157,28 +157,31 @@ function firstError(report) {
   return line.length > 300 ? `${line.slice(0, 300)}…` : line;
 }
 
+// Why the run produced nothing, in a few words. The gate's reason wins: it knows
+// the environment was down, which a results file never shows.
+function abortReason(report, suiteResult) {
+  const raw = (process.env.ABORT_REASON || '').trim();
+  // An undefined pipeline variable is not empty - ADO leaves the macro in
+  // place, and "$(ABORT_REASON)" posted to the channel would be worse than no
+  // reason at all. RINGCENTRAL_WEBHOOK_URL already caught us out this way.
+  const fromGate = /^\$\(.*\)$/.test(raw) ? '' : raw;
+  if (fromGate) return fromGate;
+  if (/^cancell?ed$/.test(suiteResult)) return 'the run was canceled or hit its time limit';
+  const err = report ? firstError(report) : '';
+  return err || 'an error before any tests ran';
+}
+
 function buildMessage(report, suiteResult, links) {
   const label = process.env.RUN_LABEL || 'Automation';
   const { pipelineUrl, resultsUrl } = links;
-  // "ended" is too soft for either case below: both mean a broken run, and a
-  // message nobody reads as a problem is the same as no message.
-  const how = /^cancell?ed$/.test(suiteResult) ? 'was canceled' : 'failed';
 
-  // No results at all means the run died before reporting. Say so, rather than
-  // reporting zero failures, which reads as a pass. That silence is what hid
-  // the K12 timeout.
   if (!report) {
-    return `PrimeroEdge POS ${label} ${how} before test results were published.\n\nPipeline: ${pipelineUrl}`;
+    return `PrimeroEdge POS ${label} ended due to ${abortReason(report, suiteResult)}.\n\nPipeline: ${pipelineUrl}`;
   }
 
   const { counts, failures } = summarise(report);
   if (counts.total === 0) {
-    const reason = firstError(report);
-    return (
-      `PrimeroEdge POS ${label} ${how} before any tests ran.` +
-      (reason ? `\n\n${reason}` : '') +
-      `\n\nPipeline: ${pipelineUrl}`
-    );
+    return `PrimeroEdge POS ${label} ended due to ${abortReason(report, suiteResult)}.\n\nPipeline: ${pipelineUrl}`;
   }
 
   const pct = (n) => Math.round((n / counts.total) * 100);
