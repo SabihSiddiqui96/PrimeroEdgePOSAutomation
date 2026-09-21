@@ -30,8 +30,7 @@ export default defineConfig({
   expect: {
     timeout: positiveIntFromEnv('EXPECT_TIMEOUT_MS', process.env.CI ? 30000 : 15000),
   },
-  // POS writes to shared district data, so parallel workers would overwrite
-  // each other's setup. Run serially until a suite proves it can isolate itself.
+  // POS writes to shared district data, so workers would overwrite each other.
   workers: 1,
   retries: process.env.CI ? 1 : 0,
   reporter: [
@@ -41,8 +40,7 @@ export default defineConfig({
   ],
   use: {
     baseURL: getBaseUrl(),
-    // The session global setup signs in for. Without this every spec would
-    // repeat a slow WebForms login for no benefit.
+    // The session global setup signs in for.
     storageState: getAuthStoragePath(),
     headless: !!process.env.CI,
     ignoreHTTPSErrors: IGNORE_HTTPS_ERRORS,

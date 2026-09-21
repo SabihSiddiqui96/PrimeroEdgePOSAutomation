@@ -112,6 +112,14 @@ script's EXCLUDE set are not drift.
 then the change. The platform repo takes PRs from every automation project at once,
 so a title without the prefix makes a reviewer open it to find out whose it is.
 
+**Comments say what the line does — nothing else.** One short line, under ~90
+characters, only where the code is not obvious. Never a paragraph block explaining
+the reasoning, the history of why a value changed, what broke in CI last week, or a
+retelling of the bug that led to the line. Those blocks are the loudest AI tell in a
+diff and every reviewer reads them. If a comment needs three sentences, the code
+needs a better name instead. This applies to every file in every PR, without
+exception.
+
 **Reviewers — the required one is per repo.** All four go on every platform PR; only
 the required flag moves.
 

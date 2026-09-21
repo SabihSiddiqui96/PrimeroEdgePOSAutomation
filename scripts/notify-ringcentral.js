@@ -1,37 +1,11 @@
-/**
- * Post the POS suite result to RingCentral.
- *
- * Matches the K12 nightly's message so the channel reads the same way for both
- * suites: a counts table, duration, the failing tests grouped by spec, and a
- * link straight to the results tab. Called from azure-pipelines.yml, with the
- * webhook supplied as a secret pipeline variable.
- *
- *   node scripts/notify-ringcentral.js
- *
- * Env:
- *   RINGCENTRAL_WEBHOOK_URL  required; when unset the script exits quietly, so
- *                            a local run or a fork does not fail on it
- *   RESULTS_JSON             path to results.json (default test-results/results.json)
- *   SUITE_RESULT             the run stage's outcome, for the no-results case
- *   RUN_LABEL                friendly run name, e.g. "POS QA"
- *   COLLECTION_URI / TEAM_PROJECT / BUILD_ID   used to build the links
- *
- * Never exits non-zero: reporting must not be the thing that fails a run.
- */
+/** Post the POS suite result to RingCentral. */
 const fs = require('fs');
 const https = require('https');
 
 // Long enough to be useful, short enough that the channel stays readable.
 const MAX_LISTED_SPECS = 20;
 
-/**
- * Flatten Playwright's nested suites into one status per test.
- *
- * Skipped tests are counted but deliberately left out of the total. Most of
- * them are placeholder files for screens nobody has automated yet, and letting
- * them into the denominator reported a fully green suite as "58% passed". The
- * message is about what is live, so the total is what actually ran.
- */
+/** Flatten Playwright's nested suites into one status per test. */
 function summarise(report) {
   const counts = { passed: 0, failed: 0, skipped: 0, total: 0 };
   const failures = [];
@@ -42,9 +16,7 @@ function summarise(report) {
       const title = [...trail, spec.title].filter(Boolean).join(' > ');
       for (const test of spec.tests || []) {
         const results = test.results || [];
-        // Passing on retry counts as a pass, matching how Playwright reports
-        // flakes. timedOut and interrupted are failures: a test that never
-        // finished has not demonstrated anything.
+        // Passing on retry counts as a pass, matching how Playwright reports flakes.
         if (results.some((r) => r.status === 'passed')) {
           counts.passed += 1;
           counts.total += 1;
@@ -66,11 +38,7 @@ function summarise(report) {
   return { counts, failures };
 }
 
-/**
- * A short label for the spec a failure came from. Ticket specs get their
- * ticket number; the rest get section/page, which is how these screens are
- * referred to in review anyway.
- */
+/** A short label for the spec a failure came from. */
 function tagFor(file) {
   const normalised = (file || '').replace(/\\/g, '/');
   const base = normalised
@@ -137,14 +105,7 @@ function buildStartedMessage(links) {
   return `PrimeroEdge POS ${label} started.\n\nMonitor: ${links.pipelineUrl}`;
 }
 
-/**
- * The reason a run died before testing, when Playwright recorded one.
- *
- * A globalSetup failure lands in the report's top-level errors rather than in
- * any test, so without this the message can only say that nothing ran - which
- * reads like a quiet night instead of a broken one. The full stack stays in
- * the build log; one line is enough to tell QA being down from a real bug.
- */
+/** The reason a run died before testing, when Playwright recorded one. */
 function firstError(report) {
   const raw = (report.errors || []).map((e) => e && (e.message || e.value)).find(Boolean);
   if (!raw) return '';
@@ -157,16 +118,12 @@ function firstError(report) {
   return line.length > 300 ? `${line.slice(0, 300)}…` : line;
 }
 
-// Why the run produced nothing, in a few words. The gate's reason wins: it knows
-// the environment was down, which a results file never shows.
+// Why the run produced nothing, in a few words.
 function abortReason(report, suiteResult) {
   const raw = (process.env.ABORT_REASON || '').trim();
-  // An undefined pipeline variable is not empty - ADO leaves the macro in
-  // place, and "$(ABORT_REASON)" posted to the channel would be worse than no
-  // reason at all. RINGCENTRAL_WEBHOOK_URL already caught us out this way.
+  // An undefined pipeline variable is not empty
   const fromGate = /^\$\(.*\)$/.test(raw) ? '' : raw;
-  // The caller puts this mid-sentence, and a reason lifted from an exception
-  // brings its own full stop along - "... exceeded.." otherwise.
+  // The caller puts this mid-sentence
   const tidy = (reason) => reason.replace(/\.+$/, '');
 
   if (fromGate) return tidy(fromGate);
@@ -197,9 +154,7 @@ function buildMessage(report, suiteResult, links) {
     `✅ ${'Passed:'.padEnd(10)}${counts.passed} (${pct(counts.passed)}%)`,
     `❌ ${'Failed:'.padEnd(10)}${counts.failed} (${pct(counts.failed)}%)`,
   ];
-  // No skipped line. The skips are screens nobody has automated yet, and
-  // reporting a backlog count next to the results only invites the question
-  // of why a passing run is not at 100%.
+  // No skipped line.
   lines.push(`📊 ${'Total:'.padEnd(10)}${counts.total}`, `⏱ ${'Duration:'.padEnd(10)}${duration}`);
 
   return lines.join('\n') + failedSection(failures) + `\n\nResults: ${resultsUrl}`;
@@ -228,15 +183,7 @@ function post(webhook, text) {
   });
 }
 
-/**
- * The webhook, or null when it is not usable.
- *
- * An undefined pipeline variable is not empty: Azure DevOps leaves the macro
- * in place, so the value arrives as the literal "$(RINGCENTRAL_WEBHOOK_URL)".
- * That is truthy, so a plain falsy check waves it through and the run fails
- * later with a bare "Invalid URL" that says nothing about the cause. Never
- * log the value itself - it is a bearer credential.
- */
+/** The webhook, or null when it is not usable. */
 function resolveWebhook() {
   const raw = (process.env.RINGCENTRAL_WEBHOOK_URL || '').trim();
   if (!raw) {
@@ -268,17 +215,14 @@ function resolveWebhook() {
   const webhook = resolveWebhook();
   if (!webhook) return;
 
-  // The project name carries a space ("PrimeroEdge Classic"), so it has to be
-  // encoded or the link breaks where the chat client stops parsing the URL.
+  // The project name carries a space ("PrimeroEdge Classic")
   const pipelineUrl =
     `${process.env.COLLECTION_URI || ''}${encodeURIComponent(process.env.TEAM_PROJECT || '')}` +
     `/_build/results?buildId=${process.env.BUILD_ID || ''}`;
   const resultsUrl = `${pipelineUrl}&view=ms.vss-test-web.build-test-results-tab`;
   const links = { pipelineUrl, resultsUrl };
 
-  // Both messages go through this script rather than a curl in the YAML: the
-  // payload needs embedded newlines, and getting those through YAML into a
-  // shell string intact is a reliable way to post malformed JSON.
+  // Both messages go through this script rather than a curl in the YAML
   if (process.argv.includes('--started')) {
     const started = buildStartedMessage(links);
     console.log('Sending webhook:', started);

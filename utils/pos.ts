@@ -37,25 +37,14 @@ export async function loginToPrimeroEdge(page: Page): Promise<void> {
   });
 }
 
-/**
- * Log in and open Point of Service, returning the page sitting on POS Home.
- *
- * POS is a module inside PrimeroEdge Classic rather than a separate app, so the
- * tile navigates in the same tab and no window handling is needed.
- */
+/** Log in and open Point of Service, returning the page sitting on POS Home. */
 export async function openPointOfService(page: Page): Promise<Page> {
   await signIn(page);
   await goToPosHome(page);
   return page;
 }
 
-/**
- * Put the page on an authenticated session.
- *
- * Specs start from the session global setup cached, so the dashboard normally
- * opens straight away and no form is involved. Classic bounces to the login
- * page once that session expires, which is the only case that still needs one.
- */
+/** Put the page on an authenticated session. */
 export async function signIn(page: Page): Promise<void> {
   await page.goto(getDashboardPath(), { waitUntil: 'domcontentloaded' });
   if (isOnLoginPage(page)) {
@@ -67,15 +56,7 @@ function isOnLoginPage(page: Page): boolean {
   return page.url().toLowerCase().includes(getLoginPath().toLowerCase());
 }
 
-/**
- * Navigate from the dashboard to POS Home.
- *
- * The dashboard renders the tile twice — once in the collapsed left-nav module
- * list and once as the visible workspace tile — so the visible one is selected
- * explicitly. If the tile is absent (module toggled off for the account) the
- * module URL is still reachable, so fall back to it and say so, rather than
- * spending the click timeout on an element that will never appear.
- */
+/** Navigate from the dashboard to POS Home. */
 export async function goToPosHome(page: Page): Promise<void> {
   const posPath = getPosHomePath();
 
@@ -117,17 +98,11 @@ export function districtSelector(page: Page) {
   return page.getByRole('button', { name: /SCHOOLS|DISTRICT|ISD/i }).first();
 }
 
-/**
- * Log in and open a POS page directly by its path.
- *
- * The nav accordion has to be expanded before a section's links are clickable,
- * so specs that only care about one screen go straight to its URL instead.
- */
+/** Log in and open a POS page directly by its path. */
 export async function openPosPage(page: Page, path: string): Promise<Page> {
   await page.goto(path, { waitUntil: 'domcontentloaded' });
 
-  // One navigation is enough with a live session. If it has expired Classic
-  // sends us to the login form instead, so sign in and ask for the page again.
+  // One navigation is enough with a live session.
   if (isOnLoginPage(page)) {
     await loginToPrimeroEdge(page);
     await page.goto(path, { waitUntil: 'domcontentloaded' });

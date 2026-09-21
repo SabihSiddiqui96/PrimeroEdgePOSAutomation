@@ -10,10 +10,7 @@ import {
   expectVisible,
 } from '../../../utils/screen';
 
-// POS > Administration > Record Sales (/POS/ManualSaleBulkEntry.aspx)
-//
-// Record Sales lands on a real site, terminal and session date, all of which
-// are district data - the spec checks they are populated, not what they say.
+// POS > Administration > Record Sales (/POS/ManualSaleBulkEntry.aspx) Record Sales lands on a
 const PATH = '/POS/ManualSaleBulkEntry.aspx';
 
 test.describe('POS - Administration - Record Sales', () => {

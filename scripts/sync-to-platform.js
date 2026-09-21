@@ -1,33 +1,5 @@
 #!/usr/bin/env node
-/**
- * Mirror this repo into the Cybersoft.Platform monorepo folder.
- *
- * The platform repo keeps each automation project as a plain folder
- * (ExpressPoint, K12Catering, SchoolCafe, SCTV), not a submodule, so this
- * copies files across and makes its own commit there. Histories stay separate
- * on purpose: the monorepo sees one clean commit per sync instead of this
- * repo's several hundred.
- *
- * Only files git already tracks here are copied, which is what keeps secrets
- * out: .env, .env.release, node_modules and test-results are all gitignored,
- * so they can never reach the shared repo. CLAUDE.md is tracked but excluded
- * below — it is how this repo is worked on, not part of the test automation.
- * Files deleted here are deleted there too, so the folder is a true mirror
- * rather than an append.
- *
- * The mirror never lands on AutomationProjects itself. That branch is shared
- * company code, so each sync cuts its own camelCase branch off it, pushes there,
- * and prints a link to raise the PR by hand.
- *
- * Usage:
- *   node scripts/sync-to-platform.js --dry-run              # show what would change
- *   node scripts/sync-to-platform.js --branch paginationFix # sync + commit + push
- *   node scripts/sync-to-platform.js -b addMethodFix -m "message"
- *   node scripts/sync-to-platform.js -b someFix --no-push   # commit locally only
- *
- * Auth: AZURE_DEVOPS_CODE_PAT in .env (needs Code Read & Write; the older
- * AZURE_DEVOPS_PAT is Work Items only and will not work here).
- */
+/** Mirror this repo into the Cybersoft.Platform monorepo folder. */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -45,9 +17,7 @@ const msgIndex = args.findIndex((a) => a === '-m' || a === '--message');
 const commitMessage =
   msgIndex !== -1 && args[msgIndex + 1] ? args[msgIndex + 1] : 'Update PrimeroEdge POS automation';
 
-// The mirror never lands on BRANCH itself. BRANCH is shared company code that
-// other people build from, so every sync cuts its own branch off it and stops
-// there — the PR is raised by hand after review.
+// The mirror never lands on BRANCH itself.
 const branchIndex = args.findIndex((a) => a === '--branch' || a === '-b');
 const featureBranch = branchIndex !== -1 ? args[branchIndex + 1] : '';
 
@@ -82,7 +52,7 @@ function fail(msg) {
   process.exit(1);
 }
 
-// --- preflight -------------------------------------------------------------
+// --- preflight
 
 if (!fs.existsSync(TARGET_REPO)) {
   fail(`platform repo not found at ${TARGET_REPO}`);
@@ -93,8 +63,7 @@ if (!pat && !noPush && !dryRun) {
   fail('AZURE_DEVOPS_CODE_PAT not found in .env (needs Code Read & Write).');
 }
 
-// Refuse to run against a dirty platform checkout — committing someone else's
-// half-finished work into a shared repo is not ours to do.
+// Refuse to run against a dirty platform checkout
 const targetDirty = git(TARGET_REPO, ['status', '--porcelain'], true)
   .split('\n')
   .filter((l) => l.trim() && !l.includes(PREFIX));
@@ -104,9 +73,7 @@ if (targetDirty.length) {
   fail('resolve those first — refusing to touch a dirty shared checkout.');
 }
 
-// The point of this mirror is "what I committed here shows up there", so a
-// half-edited working tree must not leak into the shared repo. Tracked-file
-// edits block; untracked scratch files are ignored since they are never copied.
+// The point of this mirror is "what I committed here shows up there"
 const sourceDirty = git(SOURCE, ['status', '--porcelain', '--untracked-files=no'], true)
   .split('\n')
   .filter(Boolean);
@@ -119,8 +86,7 @@ if (sourceDirty.length && !args.includes('--allow-dirty')) {
   );
 }
 
-// A branch name is required, and must be camelCase — no dashes, underscores or
-// slashes — so the PR list stays readable: dashboardFix, addMethodFix.
+// A branch name is required, and must be camelCase
 if (!dryRun) {
   if (!featureBranch) {
     fail(
@@ -149,12 +115,9 @@ if (!dryRun) {
   console.log(`Branched ${featureBranch} off ${BRANCH} (${base.slice(0, 7)}).`);
 }
 
-// --- work out the file set -------------------------------------------------
+// --- work out the file set
 
 // Tracked files only: this is the gitignore filter that keeps .env out.
-// Read the index with modes so gitlinks (mode 160000, i.e. submodules) can be
-// dropped — they are directories on disk, so copying them byte-for-byte throws
-// EISDIR, and a submodule pointer means nothing in a plain-folder mirror anyway.
 let sourceFiles = [];
 const submodules = [];
 for (const line of git(SOURCE, ['ls-files', '--stage']).split('\n')) {
@@ -168,43 +131,22 @@ if (submodules.length) {
   console.log(`Skipping ${submodules.length} submodule(s): ${submodules.join(', ')}`);
 }
 
-// Files that live in this repo but have no business in the shared monorepo. The
-// mirror is meant to carry the K12 automation suite; freshdesk-notify.js is a
-// RingCentral notifier whose real home is the FO-SprintBurnDown repo, and the copy
-// here is dead — it is paused and nothing runs it. Syncing edits to a dead file into
-// a repo other teams read is noise.
-//
-// Excluded paths are left ALONE at the target: not copied over, and not treated as
-// stale either. Dropping them from the source set without also dropping them from the
-// removal candidates would silently delete them from the shared repo on the next sync,
-// which is a much bigger action than "stop mirroring this file".
+// Files that live in this repo but have no business in the shared monorepo.
 const EXCLUDE = new Set([
   // Real home is the FO-SprintBurnDown repo; the copy here is paused and dead.
   'scripts/freshdesk-notify.js',
-  // Local Task Scheduler tooling for this machine, not shared test automation. The
-  // .vbs hardcodes an absolute path under this user profile, and auto-rerun-latest.js
-  // shells out to scripts/rerun-failed.js, which is gitignored and therefore absent
-  // from the mirror - so both are broken by construction anywhere but here.
+  // Local Task Scheduler tooling for this machine, not shared test automation.
   'scripts/auto-rerun-latest.js',
   'scripts/auto-rerun-hidden.vbs',
-  // This script itself. It mirrors *into* the platform repo and hardcodes an
-  // absolute path under this user profile, so it is meaningless once copied
-  // there — and it is not test automation, which is all the shared repo wants.
+  // This script itself.
   'scripts/sync-to-platform.js',
-  // House rules for working in this repo - ticket conventions, hour logging,
-  // how to reach the tracker. Useful here, noise in a shared monorepo.
+  // House rules for working in this repo
   'CLAUDE.md',
-  // The nightly pipeline belongs to this repo's own ADO pipeline, which builds
-  // from GitHub. A copy inside the monorepo would be a second definition of
-  // the same build that nobody runs.
+  // The nightly pipeline belongs to this repo's own ADO pipeline, which builds from GitHub.
   'azure-pipelines.yml',
-  // Only ever called by that pipeline, and it posts to a RingCentral channel
-  // owned by this team. Dead weight in the monorepo.
+  // Only ever called by that pipeline, and it posts to a RingCentral channel owned by this team.
   'scripts/notify-ringcentral.js',
-  // Repo furniture that belongs to this repo, not to a folder inside someone
-  // else's monorepo. A nested .gitignore would quietly change what the platform
-  // repo ignores under this path, and the rest is documentation and formatting
-  // config the shared repo has its own versions of.
+  // Repo furniture that belongs to this repo, not to a folder inside someone else's monorepo.
   '.gitignore',
   '.prettierrc',
   '.env.example',
@@ -265,7 +207,7 @@ if (dryRun) {
   process.exit(0);
 }
 
-// --- apply -----------------------------------------------------------------
+// --- apply
 
 for (const rel of stale) {
   fs.rmSync(path.join(TARGET_REPO, PREFIX, rel), { force: true });
@@ -277,12 +219,7 @@ for (const rel of sourceFiles) {
   fs.copyFileSync(path.join(SOURCE, rel), dest);
 }
 
-// --force is required, not sloppiness. This repo's .gitignore is itself one of
-// the copied files, so git re-applies it inside the mirror and refuses paths
-// that are legitimately tracked here — files added before a later ignore rule,
-// or force-added at the time. The source repo's tracked set is the authority on
-// what belongs in the mirror; nothing outside that set is ever copied, so there
-// is no risk of sweeping in build output or secrets.
+// --force is required, not sloppiness.
 git(TARGET_REPO, ['add', '--all', '--force', PREFIX]);
 
 const staged = git(TARGET_REPO, ['diff', '--cached', '--name-only', PREFIX], true);
@@ -299,8 +236,7 @@ if (noPush) {
   process.exit(0);
 }
 
-// Push over an authenticated URL built at call time so the PAT is never written
-// into .git/config where it would sit on disk in the shared checkout.
+// Push over an authenticated URL built at call time so the PAT is never written into
 const authUrl = `https://anything:${pat}@${REMOTE_PATH}`;
 try {
   execFileSync('git', ['-C', TARGET_REPO, 'push', authUrl, `HEAD:${featureBranch}`], {
@@ -319,6 +255,5 @@ console.log(
     `pullrequestcreate?sourceRef=${featureBranch}&targetRef=${BRANCH}`,
 );
 
-// Leave the shared checkout back on BRANCH so the next sync starts clean and
-// nobody finds it parked on a one-off branch.
+// Leave the shared checkout back on BRANCH so the next sync starts clean and nobody finds it
 git(TARGET_REPO, ['checkout', BRANCH], true);

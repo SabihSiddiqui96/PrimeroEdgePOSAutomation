@@ -9,12 +9,7 @@ import { loginToPrimeroEdge } from './utils/pos';
 
 dotenv.config({ path: process.env.ENV_FILE?.trim() || '.env' });
 
-/**
- * Signs in once and caches the session, so each spec starts authenticated rather
- * than repeating a slow WebForms login. Re-authenticates when the cache is
- * missing, or when PE_USERNAME has changed since it was written. FORCE_AUTH=1
- * refreshes it on demand.
- */
+/** Signs in once and caches the session. FORCE_AUTH=1 refreshes it. */
 export default async function globalSetup(_config: FullConfig): Promise<void> {
   const username = process.env.PE_USERNAME?.trim();
   if (!username) {
@@ -31,9 +26,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
 
   if (!needAuth) return;
 
-  // This browser and context are ours, not the runner's, so nothing in the
-  // config's `use` block reaches them - both settings have to be applied here
-  // by hand. utils/browserEnv.ts is the single place either is decided.
+  // Our own browser and context, so the config's `use` block does not apply.
   const browser = await chromium.launch({ channel: browserChannel() });
   const context = await browser.newContext({
     baseURL: getBaseUrl(),

@@ -24,12 +24,7 @@ export class LoginPage {
       .or(page.locator('button[type="submit"]'));
   }
 
-  /**
-   * The QA environment intermittently drops the first request after an idle
-   * period, so the form is retried rather than failing the whole run on a blip.
-   * Retries are confined to reaching the login form — once credentials are
-   * submitted, a failure is a real failure.
-   */
+  /** The QA environment intermittently drops the first request after an idle period */
   async goto(): Promise<void> {
     const loginPath = getLoginPath();
     const maxAttempts = positiveIntFromEnv('LOGIN_MAX_ATTEMPTS', 3);
@@ -64,9 +59,7 @@ export class LoginPage {
   async login(username: string, password: string): Promise<void> {
     await this.usernameInput.fill(username);
     await this.passwordInput.fill(password);
-    // Sign in triggers a WebForms postback. The default action timeout expires
-    // while Playwright waits on the scheduled navigation, so a slow-but-working
-    // login fails spuriously without a wider budget here.
+    // Sign in triggers a WebForms postback.
     await this.loginButton.click({
       timeout: positiveIntFromEnv('LOGIN_SUBMIT_TIMEOUT_MS', 30000),
     });

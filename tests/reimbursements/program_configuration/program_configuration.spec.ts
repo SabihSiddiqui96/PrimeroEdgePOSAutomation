@@ -29,9 +29,7 @@ test.describe('POS - Reimbursements - Program Configuration', () => {
         'Filter By Meal Type :',
       ]);
 
-      // The configured/not-configured summary carries live site counts, so
-      // match its shape rather than the numbers - those move the moment anyone
-      // configures a site.
+      // The configured/not-configured summary carries live site counts
       await expect(
         content(page)
           .getByText(/Not Configured:\s*\d+\s*Site\(s\)/)
