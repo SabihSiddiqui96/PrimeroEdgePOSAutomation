@@ -280,6 +280,11 @@ done, so anything that reached a PR gets written down. No PR, no comment.
 This repo's task: **121073** — PrimeroEdge POS Module - Automation Testing
 https://dev.azure.com/Cybersoft-Technologies-Inc/PrimeroEdge%20Classic/_workitems/edit/121073
 
+**Each ticket comment stands on its own.** Never point at another repo's work — no
+"same change as K12", no "as in SchoolCafe". Whoever reads this ticket has no view
+of the others, so say what was done here in full, even when the same work landed
+elsewhere the same day.
+
 Bump `Custom.ActualHours` (a string) in the same pass, and read the work item's
 `/updates` first — Sabih logs hours by hand, so only add if the period is not already
 covered, and say plainly if you skipped it.
