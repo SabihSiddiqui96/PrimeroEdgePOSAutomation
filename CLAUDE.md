@@ -102,6 +102,12 @@ If any change touches
 create a new branch, push there, and have a reviewer create the CR. Never push
 directly to `main`/`master` on that ADO repo.
 
+**GitHub and the platform mirror must stay in sync.** When they match, nothing to
+do. When they do not, raise a PR — the same as every other repo. Run
+`node scripts/sync-to-platform.js --dry-run` after finishing work; anything it lists
+as new, changed or removed belongs in a PR before the job is done. Paths in the
+script's EXCLUDE set are not drift.
+
 **Prefix the PR title with the repo.** `SchoolCafe: `, `K12: `, `POS: `, `CafeTV: `
 then the change. The platform repo takes PRs from every automation project at once,
 so a title without the prefix makes a reviewer open it to find out whose it is.
