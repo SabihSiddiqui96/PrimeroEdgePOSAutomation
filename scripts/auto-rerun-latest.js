@@ -19,7 +19,7 @@
  *   1. Nothing to do — the latest build had no failures (the pipeline announced it).
  *   2. Already handled — that build is in the re-run ledger, so a scheduled
  *      double-fire, a retry, or a manual run earlier in the day can't repeat it.
- *   3. Connectivity — test.schoolcafe.tv must resolve. A run without internet up
+ *   3. Connectivity — qa.primeroedge.co must resolve. A run without internet up
  *      fails every test on getaddrinfo and posts false "N failed" to RingCentral.
  *      This path posts the raw build numbers marked "NOT re-run" (once per build,
  *      tracked in .auto-rerun-notified.json) and leaves the ledger untouched so
@@ -27,7 +27,7 @@
  *      does the real re-run.
  *
  * The run is fetched BEFORE the connectivity check on purpose: dev.azure.com is
- * reachable even when the schoolcafe site isn't, so the fallback message can carry
+ * reachable even when QA isn't, so the fallback message can carry
  * real build numbers instead of going silent.
  *
  * Usage:

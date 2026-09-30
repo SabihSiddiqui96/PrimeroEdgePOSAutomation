@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Local "re-run failed tests" helper for CafeTV.
+ * Local "re-run failed tests" helper for PrimeroEdge POS.
  *
  * Usage:
  *   node scripts/rerun-failed.js <buildId | full build results URL> [--force]
@@ -213,7 +213,7 @@ function promptYesNo(question) {
     console.log('Build ' + id + ' has no failed tests — nothing to re-run.');
     history[histKey] = { buildId: id, lastRunAt: new Date().toISOString(), origTotal: origTotal || 0, origFailed: 0, nowPassing: 0, stillFailed: 0, allPassed: true, failedNames: [], resultsUrl };
     history.__lastBuild = histKey; writeHistory(history);
-    await sendWebhook('CafeTV Automation — re-run requested for build ' + id + ', but it has no failed tests. Nothing to re-run.\n\nOriginal run: ' + resultsUrl);
+    await sendWebhook('PrimeroEdge POS — re-run requested for build ' + id + ', but it has no failed tests. Nothing to re-run.\n\nOriginal run: ' + resultsUrl);
     return;
   }
 
@@ -224,7 +224,7 @@ function promptYesNo(question) {
   // consolidated message at the end. Suppress the "re-running…" up-front ping so
   // the channel sees a single, post-re-run result instead of a noisy pair.
   if (!process.argv.includes('--no-start-webhook')) {
-    await sendWebhook('CafeTV Automation — re-running ' + failed.length + ' previously failed test(s) with the latest changes.\n\nOriginal run: ' + resultsUrl + '\n\nUpdated results to follow.');
+    await sendWebhook('PrimeroEdge POS — re-running ' + failed.length + ' previously failed test(s) with the latest changes.\n\nOriginal run: ' + resultsUrl + '\n\nUpdated results to follow.');
   }
 
   const grep = failed.map(titleToGrep).join('|');
@@ -248,7 +248,7 @@ function promptYesNo(question) {
   const pctOf = (n, d) => (d ? Math.round((n / d) * 100) : 0);
 
   const text =
-    '**CafeTV — Failed-test re-run complete**\n\n' +
+    '**PrimeroEdge POS — Failed-test re-run complete**\n\n' +
     'Re-ran ' + ranCount + ' failed test(s):\n\n' +
     '✅ ' + 'Passed:'.padEnd(9) + nowPassing + '\n' +
     '❌ ' + 'Failed:'.padEnd(9) + newFailed + '\n\n' +

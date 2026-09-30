@@ -22,9 +22,14 @@ import { getBaseUrl } from './utils/baseUrl';
 import { getAuthStoragePath } from './utils/authStorage';
 import { positiveIntFromEnv } from './utils/env';
 import { browserChannel, IGNORE_HTTPS_ERRORS } from './utils/browserEnv';
+import { unwrittenSpecs } from './utils/unwrittenSpecs';
+
+const TEST_DIR = path.resolve(__dirname, 'tests');
 
 export default defineConfig({
-  testDir: './tests',
+  testDir: TEST_DIR,
+  // Screens with no specs written yet never run, so the totals count real work.
+  testIgnore: unwrittenSpecs(TEST_DIR),
   globalSetup: './global-setup.ts',
   timeout: positiveIntFromEnv('TEST_TIMEOUT_MS', process.env.CI ? 180000 : 90000),
   expect: {
