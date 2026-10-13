@@ -177,9 +177,16 @@ export async function openService(window: Page, dollars: string): Promise<string
   return openingBalance;
 }
 
+export interface SaleLine {
+  name: string;
+  quantity: number;
+  amount: string;
+}
+
 export interface ChargedSale {
   items: number;
   total: string;
+  lines: SaleLine[];
 }
 
 /** Ring up a meal and an extra for the patron and charge it to their account. */
@@ -222,6 +229,8 @@ export async function chargeMeal(window: Page, patronId = DEFAULT_PATRON_ID): Pr
   const totalText = await window.getByText(/Total Amount Due/i).first().innerText();
   const total = totalText.match(/\$\s*([\d,]+\.\d{2})/)?.[1] ?? '';
   expect(total, 'total amount due').not.toBe('');
+  const lines = await orderLines(window);
+  expect(lines.length, 'order lines read from the order panel').toBe(items);
 
   const charge = window.locator('ion-button').filter({ hasText: /Charge/i }).last();
   await expect(charge).toBeVisible();
@@ -235,7 +244,18 @@ export async function chargeMeal(window: Page, patronId = DEFAULT_PATRON_ID): Pr
     .catch(() => undefined);
   await settle(window);
   await expect(idInput, 'back on the patron lookup after charging').toBeVisible({ timeout: 30_000 });
-  return { items, total };
+  return { items, total, lines };
+}
+
+/** The order panel: "Ext. Milk 1 $0.20 Free Lunch Meal 1 $20.00 ..." between its header and total. */
+async function orderLines(window: Page): Promise<SaleLine[]> {
+  const text = (await window.locator('body').innerText()).replace(/\s+/g, ' ');
+  const panel = text.match(/Quantity Amount (.*?) Total Amount Due/i)?.[1] ?? '';
+  return [...panel.matchAll(/(.+?) (\d+) \$(\d[\d,]*\.\d{2}) ?/g)].map((m) => ({
+    name: m[1].trim(),
+    quantity: Number(m[2]),
+    amount: m[3],
+  }));
 }
 
 async function itemCount(window: Page): Promise<number> {

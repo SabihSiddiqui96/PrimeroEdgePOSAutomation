@@ -1,4 +1,4 @@
-import { expect, Page } from '@playwright/test';
+import { expect, Locator, Page } from '@playwright/test';
 import { openPosPage } from '../../../utils/pos';
 
 export const PATH = '/POS/Reconciliation.aspx';
@@ -27,8 +27,14 @@ export async function openReconciliation(page: Page): Promise<void> {
 
 /** Pick from a Telerik combo box by the item's exact text. */
 async function pickCombo(page: Page, combo: string, item: string): Promise<void> {
-  await page.locator(`#${combo}_Arrow`).click();
-  await page.locator(`#${combo}_DropDown li`).filter({ hasText: new RegExp(`^${escape(item)}$`, 'i') }).click();
+  const option = page.locator(`#${combo}_DropDown li`).filter({ hasText: new RegExp(`^${escape(item)}$`, 'i') });
+  // The drop-down can still be animating shut from page load; reopen it once if so.
+  for (let attempt = 1; ; attempt++) {
+    await page.locator(`#${combo}_Arrow`).click();
+    const opened = await option.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true, () => false);
+    if (opened || attempt === 2) break;
+  }
+  await option.click();
   await page.waitForLoadState('networkidle').catch(() => undefined);
   await expect(page.locator(`#${combo}_Input`)).toHaveValue(new RegExp(`^${escape(item)}$`, 'i'));
 }
@@ -69,7 +75,14 @@ async function postback(page: Page, action: () => Promise<void>): Promise<void> 
 }
 
 export async function apply(page: Page): Promise<void> {
-  await postback(page, () => page.locator(`#${ID}btnApply`).click());
+  await redraw(page, () => page.locator(`#${ID}btnApply`).click());
+}
+
+/** Run a grid action and wait until the old grid is replaced; the POST answers before the redraw. */
+async function redraw(page: Page, action: () => Promise<void>): Promise<void> {
+  const oldGrid = await page.locator(`#${SESSIONS_GRID}`).elementHandle();
+  await postback(page, action);
+  await page.waitForFunction((grid) => !grid?.isConnected, oldGrid);
   await expect(page.locator(`#${SESSIONS_GRID}`)).toBeVisible();
 }
 
@@ -80,44 +93,76 @@ export async function sortNewestFirst(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 4; attempt++) {
     dates = (await sessionRows(page)).map((r) => Date.parse(r.openingDate));
     if (dates.every((d, j) => j === 0 || dates[j - 1] >= d)) return;
-    // The response lands before the grid is redrawn, so wait for the old table to be replaced.
-    const oldGrid = await page.locator(`#${SESSIONS_GRID}`).elementHandle();
-    await postback(page, () => header.click());
-    await page.waitForFunction((grid) => !grid?.isConnected, oldGrid);
+    await redraw(page, () => header.click());
   }
   throw new Error(`Sessions grid would not sort newest first: ${dates.map((d) => new Date(d).toLocaleTimeString()).join(', ')}`);
 }
 
-/** Every session row in the grid, keyed by the grid's own column headers. */
-export async function sessionRows(page: Page): Promise<SessionRow[]> {
-  const grid = page.locator(`#${SESSIONS_GRID}`);
+/** Rows of a Telerik grid as { header: cell text }. */
+export async function readGrid(table: Locator): Promise<Record<string, string>[]> {
   // Sorting adds hidden "HeaderText" labels to each header cell.
-  const headers = (await grid.locator('thead th').allInnerTexts()).map((h) => h.replace(/HeaderText/g, '').trim());
-  const col = (name: string) => {
-    const index = headers.indexOf(name);
-    if (index < 0) throw new Error(`Sessions grid has no "${name}" column; saw ${headers.join(', ')}`);
-    return index;
-  };
-  const rows = grid.locator('tr.rgRow, tr.rgAltRow');
-  const result: SessionRow[] = [];
+  const headers = (await table.locator('> thead th').allInnerTexts()).map((h) => h.replace(/HeaderText/g, '').trim());
+  const rows = table.locator('> tbody > tr.rgRow, > tbody > tr.rgAltRow');
+  const result: Record<string, string>[] = [];
   for (let i = 0; i < (await rows.count()); i++) {
     const cells = (await rows.nth(i).locator('> td').allInnerTexts()).map((c) => c.replace(/\s+/g, ' ').trim());
-    result.push({
-      terminal: cells[col('Terminal')],
-      cashier: cells[col('Cashier')],
-      openingBalance: cells[col('Opening Balance')],
-      openingDate: cells[col('Opening Date')],
-      closingBalance: cells[col('Closing Balance')],
-      status: cells[col('Status')],
-      overUnder: cells[col('Over/Under')],
-    });
+    result.push(Object.fromEntries(headers.map((h, j) => [h, cells[j] ?? ''])));
   }
   return result;
+}
+
+/** Every session row in the grid. */
+export async function sessionRows(page: Page): Promise<SessionRow[]> {
+  return (await readGrid(page.locator(`#${SESSIONS_GRID}`))).map((r) => {
+    for (const column of ['Terminal', 'Cashier', 'Opening Balance', 'Opening Date', 'Closing Balance', 'Status', 'Over/Under']) {
+      if (!(column in r)) throw new Error(`Sessions grid has no "${column}" column; saw ${Object.keys(r).join(', ')}`);
+    }
+    return {
+      terminal: r['Terminal'],
+      cashier: r['Cashier'],
+      openingBalance: r['Opening Balance'],
+      openingDate: r['Opening Date'],
+      closingBalance: r['Closing Balance'],
+      status: r['Status'],
+      overUnder: r['Over/Under'],
+    };
+  });
+}
+
+/** Session Status filter boxes: Initialized, Opened and Closed are ticked by default. */
+export async function showStatus(page: Page, status: 'Reconciled' | 'Deposited', shown = true): Promise<void> {
+  const index = { Reconciled: 3, Deposited: 4 }[status];
+  await page.locator(`#${ID}chkSessionStatus_${index}`).setChecked(shown);
+}
+
+/** Filter to one site and today, newest session first. */
+export async function filterToday(page: Page, siteCode: string, siteName: string, statuses: ('Reconciled' | 'Deposited')[] = []): Promise<void> {
+  await openReconciliation(page);
+  await selectSiteCode(page, siteCode);
+  await selectSite(page, siteName);
+  await setDateRange(page, today(), today());
+  for (const status of statuses) await showStatus(page, status);
+  await apply(page);
+  await sortNewestFirst(page);
+}
+
+/** Open Reconciliation Info for the session that opened at `openingDate`. */
+export async function openReconcile(page: Page, openingDate: string): Promise<void> {
+  const index = (await sessionRows(page)).findIndex((r) => r.openingDate === openingDate);
+  expect(index, `session opened ${openingDate} in the grid`).toBeGreaterThanOrEqual(0);
+  await page.locator(`#${SESSIONS_GRID} > tbody > tr`).filter({ hasText: openingDate }).locator('a[title^="Reconcile"]').click();
+  await expect(page).toHaveTitle(/Reconciliation Info/i);
 }
 
 /** The session opened most recently on this page, by its Opening Date and time. */
 export function newestSession(rows: SessionRow[]): SessionRow | undefined {
   return [...rows].sort((a, b) => Date.parse(a.openingDate) - Date.parse(b.openingDate)).pop();
+}
+
+/** Signed cents as the grids print them: "$41.00", "($15.00)". */
+export function money(value: number): string {
+  const text = `$${(Math.abs(value) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+  return value < 0 ? `(${text})` : text;
 }
 
 /** "$1,234.50" or "($3.00)" to a signed number of cents. */
