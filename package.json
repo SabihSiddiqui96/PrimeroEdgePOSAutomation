@@ -5,6 +5,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "postinstall": "node scripts/patch-playwright-cdp.js",
     "test": "npx playwright test",
     "test:headed": "npx playwright test --headed",
     "report:show": "npx playwright show-report",
