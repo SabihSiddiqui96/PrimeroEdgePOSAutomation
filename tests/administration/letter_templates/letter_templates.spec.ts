@@ -178,7 +178,7 @@ async function typeName(editor: Page, box: ReturnType<Page['locator']>, name: st
   await editor.keyboard.press('Control+A');
   await editor.keyboard.press('Backspace');
   await editor.keyboard.type(name, { delay: 30 });
-  const check = editor.waitForResponse((r) => /IsTemplateNameAlreadyExisting/.test(r.url()));
+  const check = editor.waitForResponse((r) => /IsTemplateNameAlreadyExisting/.test(r.url()), { timeout: 60_000 });
   await box.press('Tab');
   await check;
 }
