@@ -44,12 +44,63 @@ export async function typeDate(page: Page, id: string, value: string): Promise<v
   await expect(input).toHaveValue(value);
 }
 
-/** Run an action that redraws a grid; the POST answers before the redraw, so wait for the old grid to go. */
+type Manager = { getInstance(): { get_isInAsyncPostBack(): boolean; add_endRequest(handler: () => void): void } };
+type PostbackWindow = { Sys?: { WebForms?: { PageRequestManager?: Manager } }; postbacksDone?: number; gridWas?: string };
+
+/**
+ * Run an action that redraws a grid. The old grid is marked; wait for an unmarked one, changed rows or a
+ * finished postback. A mark rather than a handle, because the action can reload the whole page.
+ */
 export async function redraw(page: Page | Frame, grid: string, action: () => Promise<void>): Promise<void> {
-  const old = (await page.locator(grid).count()) ? await page.locator(grid).elementHandle() : null;
+  await postbacksSettled(page);
+  const marked = await page.evaluate((sel) => {
+    const w = window as unknown as PostbackWindow;
+    const manager = w.Sys?.WebForms?.PageRequestManager?.getInstance();
+    if (manager && w.postbacksDone === undefined) {
+      w.postbacksDone = 0;
+      manager.add_endRequest(() => (w.postbacksDone = (w.postbacksDone ?? 0) + 1));
+    }
+    const g = document.querySelector(sel) as HTMLElement | null;
+    if (!g) return null;
+    g.dataset.redrawn = 'old';
+    w.gridWas = g.innerHTML;
+    return w.postbacksDone ?? 0;
+  }, grid);
   await action();
-  if (old) await page.waitForFunction((g) => !g.isConnected, old);
+  // Some grids are updated in place rather than replaced; QA can take well over 15s to answer.
+  if (marked !== null) {
+    await page.waitForFunction(
+      ({ sel, before }) => {
+        const w = window as unknown as PostbackWindow;
+        const g = document.querySelector(sel) as HTMLElement | null;
+        return !!g && (g.dataset.redrawn !== 'old' || g.innerHTML !== w.gridWas || (w.postbacksDone ?? 0) > before);
+      },
+      { sel: grid, before: marked },
+      { timeout: 60_000, polling: 200 },
+    );
+  }
   await expect(page.locator(grid)).toBeVisible();
+  await postbacksSettled(page);
+}
+
+/** Wait until postbacks stop: a checkbox's own postback can start late, and a click sent during one is dropped. */
+async function postbacksSettled(page: Page | Frame): Promise<void> {
+  const busy = () => page.evaluate(() => {
+    const w = window as unknown as PostbackWindow;
+    return { done: w.postbacksDone ?? 0, active: !!w.Sys?.WebForms?.PageRequestManager?.getInstance().get_isInAsyncPostBack() };
+  });
+  for (let settled = false; !settled; ) {
+    await postbackIdle(page);
+    const before = await busy();
+    await page.waitForTimeout(800);
+    const after = await busy();
+    settled = after.done === before.done && !after.active;
+  }
+}
+
+/** Wait out an async postback in flight; a click sent during one is dropped. */
+export async function postbackIdle(page: Page | Frame): Promise<void> {
+  await page.waitForFunction(() => !(window as unknown as PostbackWindow).Sys?.WebForms?.PageRequestManager?.getInstance().get_isInAsyncPostBack(), undefined, { timeout: 60_000, polling: 200 });
 }
 
 /** "32 items in 4 pages" when the grid is paged, otherwise the rows on screen. */
@@ -72,6 +123,11 @@ export async function gridRows(page: Page | Frame, grid: string): Promise<Record
 /** Rows from every page of a paged grid, leaving it on the last page. */
 export async function allGridRows(page: Page, grid: string): Promise<Record<string, string>[]> {
   const total = await gridTotal(page, grid);
+  // Apply keeps the page the grid was on, so start again from page one.
+  const current = page.locator(`${grid} .rgPager .rgCurrentPage`).first();
+  if ((await current.count()) && (await current.innerText()).trim() !== '1') {
+    await redraw(page, grid, () => page.locator(`${grid} .rgPageFirst`).first().click());
+  }
   const rows = await gridRows(page, grid);
   while (rows.length < total) {
     const next = page.locator(`${grid} .rgPageNext`).first();
@@ -97,12 +153,15 @@ export function money(value: number): string {
   return value < 0 ? `(${text})` : text;
 }
 
-type SortKind = 'text' | 'number' | 'money' | 'date';
+type SortKind = 'text' | 'number' | 'money' | 'date' | 'grade';
+
+const GRADE_ORDER = ['', 'PK', 'KG', ...Array.from({ length: 14 }, (_, i) => String(i + 1))];
 
 function sortKey(kind: SortKind, value: string): string | number {
   if (kind === 'money') return cents(value || '$0');
   if (kind === 'number') return Number(value.replace(/[^0-9.-]/g, '')) || 0;
   if (kind === 'date') return Date.parse(value) || 0;
+  if (kind === 'grade') return GRADE_ORDER.indexOf(value.toUpperCase());
   return value.toLowerCase();
 }
 

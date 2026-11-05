@@ -311,13 +311,6 @@ function padded(date: string): string {
   return date.replace(/\b(\d)\//g, '0$1/');
 }
 
-/** Apply, once any postback from changing a mode or filter has finished; one sent mid-postback is dropped. */
 async function apply(page: Page): Promise<void> {
-  const idle = () => page.waitForFunction(() => {
-    const sys = (window as unknown as { Sys?: { WebForms?: { PageRequestManager: { getInstance(): { get_isInAsyncPostBack(): boolean } } } } }).Sys;
-    return !sys?.WebForms?.PageRequestManager.getInstance().get_isInAsyncPostBack();
-  });
-  await idle();
   await redraw(page, GRID, () => page.locator(`#${ID}btnApply`).click());
-  await idle();
 }
