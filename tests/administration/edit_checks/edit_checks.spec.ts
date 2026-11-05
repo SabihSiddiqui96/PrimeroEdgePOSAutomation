@@ -1,7 +1,8 @@
-import { test, expect, Frame, Page } from '@playwright/test';
+import { test, expect, Frame, Locator, Page } from '@playwright/test';
 import { openPosPage } from '../../../utils/pos';
 import {
   expectButtons,
+  expectGridColumns,
   expectCaptions,
   expectFilled,
   expectHasOptions,
@@ -10,8 +11,8 @@ import {
   expectVisible,
 } from '../../../utils/screen';
 import { dialogFrame } from '../../../utils/dialog';
-import { usDate } from '../../../utils/testData';
-import { gridTotal, redraw, typeDate } from '../../../utils/webforms';
+import { TEST_SITE_CODE, usDate } from '../../../utils/testData';
+import { allGridRows, expectPaging, expectSorts, gridTotal, pickSiteCode, redraw, typeDate } from '../../../utils/webforms';
 
 // POS > Administration > Edit Checks (/POS/ManageEditCheck.aspx) Month names are the one list
 const PATH = '/POS/ManageEditCheck.aspx';
@@ -72,7 +73,7 @@ test.describe('POS - Administration - Edit Checks', () => {
       const from = new Date();
       from.setDate(from.getDate() - 364);
       await typeDate(page, `${INPUT}fromCalendarPopup_dateInput`, usDate(from));
-      await redraw(page, GRID, () => page.locator(`#${ID}btnApply`).click());
+      await apply(page);
       const all = await gridTotal(page, GRID);
       expect(all, 'edit checks in the last 12 months').toBeGreaterThan(0);
       const resolved = await showResolved(page, 'Resolved');
@@ -84,30 +85,81 @@ test.describe('POS - Administration - Edit Checks', () => {
       return { all, resolved, unresolved };
     });
 
+    const yearRows = await test.step('Pages, page size, and sorting by each column', async () => {
+      await expectGridColumns(page, `${ID}RadGridEditCheck_ctl00`, ['Site', 'Date', 'Meal Type', 'Eligibility', 'Reason', 'Resolved', 'Options']);
+      const every = await allGridRows(page, GRID);
+      await redraw(page, GRID, () => page.locator(`${GRID} .rgPageFirst`).first().click());
+      if (counts.all > (await rows(page)).length) await expectPaging(page, GRID);
+      await expectSorts(page, GRID, 'Date', 'date');
+      await expectSorts(page, GRID, 'Site');
+      await expectSorts(page, GRID, 'Meal Type');
+      await expectSorts(page, GRID, 'Eligibility');
+      return every;
+    });
+
+    await test.step('Options: both patron reports open for the check’s site and day', async () => {
+      // Site 103's reports fail on QA; that is covered by the fixme test below.
+      expect(yearRows.some((r) => r['Site'] !== TEST_SITE_CODE), 'a check on another site').toBe(true);
+      let index = (await rows(page)).findIndex((r) => r.site !== TEST_SITE_CODE);
+      if (index < 0) {
+        await redraw(page, GRID, () => page.locator(`${GRID} > thead`).getByRole('link', { name: 'Site', exact: true }).click());
+        index = (await rows(page)).findIndex((r) => r.site !== TEST_SITE_CODE);
+      }
+      const row = page.locator(`${GRID} > tbody > tr.rgRow, ${GRID} > tbody > tr.rgAltRow`).nth(index);
+      const date = (await rows(page))[index].date;
+      for (const id of ['ReportCaller_rptRetriever', 'ReportCallerAllStudents_rptRetriever']) {
+        const text = await reportText(page, row.locator(`input[id$="${id}"]`));
+        expect(text, id).toContain('Patron Participation');
+        expect(text, id).toContain(`Date: ${padded(date)}`);
+        expect(text, id).toMatch(/Patron Count: \d+/);
+      }
+    });
+
     await test.step('Reason shows the counts behind the check', async () => {
       const first = (await rows(page))[0];
       await page.locator(`${GRID} > tbody > tr`).first().locator('a[id$="hlReason"]').click();
       const frame = await dialog(page, /EditCheckReason\.aspx/);
       const text = (await frame.locator('body').innerText()).replace(/\s+/g, ' ');
-      expect(text).toContain(`Date: ${first.date} `);
+      expect(text).toContain(`Date: ${padded(first.date)} `);
       expect(text).toMatch(new RegExp(`Site: ${first.site} - `));
       expect(text).toContain(`Reason: ${first.reason}`);
-      const [, approved, count, percent] = text.match(new RegExp(`${first.eligibility} (\\d+) (\\d+) ([\\d.]+) [\\d.]+`)) ?? [];
-      expect(approved, 'approved / count / % row').toBeDefined();
-      expect(Number(percent), 'count as a % of approved').toBeCloseTo((Number(count) / Number(approved)) * 100, 1);
+      const [, approved, count, percent, factor] = (text.match(new RegExp(`${first.eligibility} (\\d+) (\\d+) ([\\d.]+) ([\\d.]+)`)) ?? []).map(Number);
+      expect(approved, 'approved / count / % / factor row').toBeDefined();
+      // With nothing approved the % has no meaning and shows 0.00.
+      expect(percent, 'count as a % of approved').toBeCloseTo(approved ? (count / approved) * 100 : 0, 1);
+      if (/Exceeds approved count/.test(first.reason)) expect(count, 'count over approved').toBeGreaterThan(approved);
+      if (/Exceeds attendance factor/.test(first.reason)) expect(percent, '% over the attendance factor').toBeGreaterThan(factor);
       await frame.locator('#ctl00_btnClose').click();
       await expect(page.locator('.RadWindow').locator('visible=true')).toHaveCount(0);
     });
 
-    await test.step('Comments: required, and adding one resolves the check', async () => {
-      if (counts.resolved === 0) {
-        // Nothing resolved yet: resolve one so there is a history to check.
-        await showResolved(page, 'Unresolved');
-        const frame = await openComments(page, 0);
-        await frame.locator('#ctl00_PopupContent_tbComments').fill(COMMENT);
-        await frame.locator('#ctl00_PopupContent_btnAddComment').click();
-        await expect(page.locator('.RadWindow').locator('visible=true')).toHaveCount(0);
+    await test.step('Comments: adding one to an unresolved check resolves it today', async () => {
+      if (counts.unresolved === 0) {
+        test.info().annotations.push({ type: 'note', description: 'no unresolved check left to resolve' });
+        return;
       }
+      await showResolved(page, 'Unresolved');
+      const target = (await rows(page))[0];
+      const frame = await openComments(page, 0);
+      await expect(frame.locator('body')).toContainText(`Date: ${padded(target.date)}`);
+      await frame.locator('#ctl00_PopupContent_tbComments').fill(COMMENT);
+      await frame.locator('#ctl00_PopupContent_btnAddComment').click();
+      await expect(page.locator('.RadWindow').locator('visible=true')).toHaveCount(0);
+
+      await apply(page);
+      expect(await gridTotal(page, GRID), 'one fewer unresolved').toBe(counts.unresolved - 1);
+      expect(await showResolved(page, 'Resolved'), 'one more resolved').toBe(counts.resolved + 1);
+      const today = new Date();
+      const resolvedToday = new RegExp(`^Resolved on 0?${today.getMonth() + 1}/0?${today.getDate()}/${today.getFullYear()} `);
+      const match = (await allGridRows(page, GRID)).filter((r) => r['Site'] === target.site && r['Date'] === target.date && r['Meal Type'] === target.mealType && r['Eligibility'] === target.eligibility);
+      expect(match, 'the check is now listed as resolved').toHaveLength(1);
+      await redraw(page, GRID, () => page.locator(`${GRID} .rgPageFirst`).first().click()).catch(() => undefined);
+      const titles = await page.locator(`${GRID} img[id$="imgResolved"]`).evaluateAll((imgs) => imgs.map((i) => i.getAttribute('title') ?? ''));
+      expect(titles.some((t) => resolvedToday.test(t)), 'a check resolved today').toBe(true);
+      await showResolved(page, 'All');
+    });
+
+    await test.step('Comments: history shows who and when; an empty comment is refused', async () => {
 
       await showResolved(page, 'Resolved');
       // The filter can lag the redraw; wait until the rows really are the resolved ones.
@@ -116,7 +168,7 @@ test.describe('POS - Administration - Edit Checks', () => {
       expect(resolved.length, 'a resolved check').toBeGreaterThan(0);
       const frame = await openComments(page, 0);
       const text = (await frame.locator('body').innerText()).replace(/\s+/g, ' ');
-      expect(text).toContain(`Date: ${resolved[0].date}`);
+      expect(text).toContain(`Date: ${padded(resolved[0].date)}`);
       expect(text, 'who commented and when').toMatch(/Comment History \S.* \d+\/\d+\/\d{4} \d+:\d{2}:\d{2} [AP]M \S/);
       await frame.locator('#ctl00_PopupContent_btnAddComment').click();
       await expect(frame.locator('body'), 'an empty comment is refused').toContainText('Please enter a comment!');
@@ -132,22 +184,85 @@ test.describe('POS - Administration - Edit Checks', () => {
       await expect(page.locator(`#${ID}ucAreaSiteSelector_rcbSiteCode_Input`)).toHaveValue(site);
       // Picking a code reloads the Site box; Apply before that runs the old filter.
       await expect(page.locator(`#${ID}ucAreaSiteSelector_rcbSite_Input`)).not.toHaveValue(/ALL/);
-      await page.waitForLoadState('networkidle');
-      await redraw(page, GRID, () => page.locator(`#${ID}btnApply`).click());
+      await apply(page);
       const narrowed = await rows(page);
       expect(narrowed.length).toBeGreaterThan(0);
       for (const row of narrowed) expect(row.site).toBe(site);
       expect(await gridTotal(page, GRID)).toBeLessThanOrEqual(counts.all);
     });
+
+    await test.step('Daily lists only that day; Monthly only that month', async () => {
+      const siteRows = await allGridRows(page, GRID);
+      const day = siteRows[0]['Date'];
+      const [m, d, y] = day.split('/').map(Number);
+      await page.locator(`#${INPUT}dailyRadioButton`).check();
+      await typeDate(page, `${INPUT}dailyCalendarPopup_dateInput`, `${m}/${d}/${y}`);
+      await apply(page);
+      const daily = await allGridRows(page, GRID);
+      for (const r of daily) expect(r['Date'], 'daily').toBe(day);
+      expect(daily.length).toBe(siteRows.filter((r) => r['Date'] === day).length);
+
+      await page.locator(`#${INPUT}monthlyRadioButton`).check();
+      await page.locator(`#${INPUT}monthlyDropDownList`).selectOption(String(m));
+      await page.locator(`#${INPUT}yearDropDownList`).selectOption(String(y));
+      await apply(page);
+      const monthly = await allGridRows(page, GRID);
+      const inMonth = (r: Record<string, string>) => r['Date'].startsWith(`${String(m).padStart(2, '0')}/`) && r['Date'].endsWith(`/${y}`);
+      for (const r of monthly) expect(inMonth(r), `${r['Date']} in ${m}/${y}`).toBe(true);
+      // The 12-month list can start partway into its first month, so compare whole months only.
+      expect(monthly.length).toBeGreaterThanOrEqual(siteRows.filter(inMonth).length);
+    });
+
+    await test.step('Date Range: a From over a year back pulls To in to one year', async () => {
+      await page.locator(`#${INPUT}dateRangeRadioButton`).check();
+      const from = new Date();
+      from.setFullYear(from.getFullYear() - 2);
+      await typeDate(page, `${INPUT}fromCalendarPopup_dateInput`, usDate(from));
+      const to = new Date(from);
+      to.setFullYear(to.getFullYear() + 1);
+      await expect(page.locator(`#${INPUT}toCalendarPopup_dateInput`)).toHaveValue(usDate(to));
+    });
+  });
+
+  // QA: both patron reports fail for site 103 with "Query execution failed for dataset 'dsRPT_POS_PatronParticipation'".
+  test.fixme('Edit Checks: patron reports open for a check on the test site', async ({ page }) => {
+    await openPosPage(page, PATH);
+    await page.locator(`#${INPUT}dateRangeRadioButton`).check();
+    const from = new Date();
+    from.setDate(from.getDate() - 364);
+    await typeDate(page, `${INPUT}fromCalendarPopup_dateInput`, usDate(from));
+    await pickSiteCode(page, TEST_SITE_CODE);
+    await apply(page);
+    const row = page.locator(`${GRID} > tbody > tr.rgRow, ${GRID} > tbody > tr.rgAltRow`).first();
+    for (const id of ['ReportCaller_rptRetriever', 'ReportCallerAllStudents_rptRetriever']) {
+      const text = await reportText(page, row.locator(`input[id$="${id}"]`));
+      expect(text, id).not.toContain('An error has occurred during report processing');
+      expect(text, id).toContain('Patron Participation');
+    }
   });
 });
+
+/** Open a report from a row button and read it once it has rendered or failed. */
+async function reportText(page: Page, button: Locator): Promise<string> {
+  const popup = page.context().waitForEvent('page');
+  await button.click();
+  const report = await popup;
+  const text = async () => (await report.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+  await expect.poll(text, { message: 'report rendered', timeout: 60_000 }).toMatch(/Patron Count:|error has occurred/);
+  const body = await text();
+  await report.close();
+  return body;
+}
 
 async function showResolved(page: Page, which: keyof typeof RESOLVED): Promise<number> {
   const radio = page.locator(`#${ID}RBLResolvedType_${RESOLVED[which]}`);
   if (!(await radio.isChecked())) {
+    // The grid is updated in place; the page reports UpdateBenchmark once the update is applied.
+    const applied = page
+      .waitForResponse((r) => r.request().method() === 'POST' && /ManageEditCheck\.aspx/i.test(r.url()))
+      .then(() => page.waitForRequest(/UpdateBenchmark/, { timeout: 60_000 }));
     await radio.check();
-    await page.waitForLoadState('networkidle');
-    // The grid isn't always swapped out, so wait for the rows to match the filter instead.
+    await applied;
     if (which !== 'All') {
       await expect
         .poll(async () => (await rows(page)).every((r) => (r.resolvedTitle !== '') === (which === 'Resolved')), { message: `${which} rows shown` })
@@ -189,4 +304,20 @@ async function dialog(page: Page, url: RegExp): Promise<Frame> {
   const frame = await dialogFrame(page, url);
   await expect(frame.locator('#ctl00_btnClose')).toBeVisible();
   return frame;
+}
+
+/** Dialogs and reports print dates as 08/11/2026; the grid may print 8/11/2026. */
+function padded(date: string): string {
+  return date.replace(/\b(\d)\//g, '0$1/');
+}
+
+/** Apply, once any postback from changing a mode or filter has finished; one sent mid-postback is dropped. */
+async function apply(page: Page): Promise<void> {
+  const idle = () => page.waitForFunction(() => {
+    const sys = (window as unknown as { Sys?: { WebForms?: { PageRequestManager: { getInstance(): { get_isInAsyncPostBack(): boolean } } } } }).Sys;
+    return !sys?.WebForms?.PageRequestManager.getInstance().get_isInAsyncPostBack();
+  });
+  await idle();
+  await redraw(page, GRID, () => page.locator(`#${ID}btnApply`).click());
+  await idle();
 }
