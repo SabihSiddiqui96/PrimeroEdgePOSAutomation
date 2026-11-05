@@ -1,4 +1,4 @@
-import { expect, Page } from '@playwright/test';
+import { expect, Frame, Page } from '@playwright/test';
 
 const SITE = 'ctl00_UserContentArea_ucAreaSiteSelector_';
 
@@ -45,7 +45,7 @@ export async function typeDate(page: Page, id: string, value: string): Promise<v
 }
 
 /** Run an action that redraws a grid; the POST answers before the redraw, so wait for the old grid to go. */
-export async function redraw(page: Page, grid: string, action: () => Promise<void>): Promise<void> {
+export async function redraw(page: Page | Frame, grid: string, action: () => Promise<void>): Promise<void> {
   const old = (await page.locator(grid).count()) ? await page.locator(grid).elementHandle() : null;
   await action();
   if (old) await page.waitForFunction((g) => !g.isConnected, old);
@@ -53,14 +53,14 @@ export async function redraw(page: Page, grid: string, action: () => Promise<voi
 }
 
 /** "32 items in 4 pages" when the grid is paged, otherwise the rows on screen. */
-export async function gridTotal(page: Page, grid: string): Promise<number> {
+export async function gridTotal(page: Page | Frame, grid: string): Promise<number> {
   const pager = await page.locator(`${grid} .rgPager`).first().innerText().catch(() => '');
   const items = pager.match(/(\d+) items in/);
   return items ? Number(items[1]) : page.locator(`${grid} > tbody > tr.rgRow, ${grid} > tbody > tr.rgAltRow`).count();
 }
 
 /** Grid rows as { header: cell text }. */
-export async function gridRows(page: Page, grid: string): Promise<Record<string, string>[]> {
+export async function gridRows(page: Page | Frame, grid: string): Promise<Record<string, string>[]> {
   return page.locator(grid).evaluate((table) => {
     const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th.rgHeader')).map((th) => (th as HTMLElement).innerText.replace(/HeaderText/g, '').trim());
     return Array.from(table.querySelectorAll(':scope > tbody > tr.rgRow, :scope > tbody > tr.rgAltRow')).map((tr) =>
@@ -95,4 +95,67 @@ export function cents(money: string): number {
 export function money(value: number): string {
   const text = `$${(Math.abs(value) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
   return value < 0 ? `(${text})` : text;
+}
+
+type SortKind = 'text' | 'number' | 'money' | 'date';
+
+function sortKey(kind: SortKind, value: string): string | number {
+  if (kind === 'money') return cents(value || '$0');
+  if (kind === 'number') return Number(value.replace(/[^0-9.-]/g, '')) || 0;
+  if (kind === 'date') return Date.parse(value) || 0;
+  return value.toLowerCase();
+}
+
+function inOrder(keys: (string | number)[], descending: boolean): boolean {
+  return keys.every((k, i) => {
+    if (i === 0) return true;
+    const prev = keys[i - 1];
+    const cmp = typeof k === 'number' ? (k as number) - (prev as number) : String(k).localeCompare(String(prev));
+    return descending ? cmp <= 0 : cmp >= 0;
+  });
+}
+
+/** Clicking a header sorts that column ascending, then descending. */
+export async function expectSorts(page: Page, grid: string, column: string, kind: SortKind = 'text'): Promise<void> {
+  const header = page.locator(`${grid} > thead`).getByRole('link', { name: column, exact: true });
+  const columnKeys = async () => (await gridRows(page, grid)).map((r) => sortKey(kind, r[column]));
+  for (const descending of [false, true]) {
+    await redraw(page, grid, () => header.click());
+    const keys = await columnKeys();
+    expect(keys.length, `${column}: rows to sort`).toBeGreaterThan(1);
+    expect(inOrder(keys, descending), `${column} ${descending ? 'descending' : 'ascending'}: ${keys.join(', ')}`).toBe(true);
+  }
+}
+
+/** The pager: next, last, first, and a bigger page size, against "N items in M pages". */
+export async function expectPaging(page: Page, grid: string): Promise<void> {
+  const pager = page.locator(`${grid} .rgPager`).first();
+  const info = async () => {
+    const [, items, pages] = (await pager.innerText()).match(/(\d+) items in (\d+) pages/) ?? [];
+    return { items: Number(items), pages: Number(pages) };
+  };
+  const rowCount = () => page.locator(`${grid} > tbody > tr.rgRow, ${grid} > tbody > tr.rgAltRow`).count();
+  const current = () => pager.locator('.rgCurrentPage').innerText();
+  const { items, pages } = await info();
+  expect(pages, `${grid}: more than one page`).toBeGreaterThan(1);
+  const size = await rowCount();
+  expect(pages).toBe(Math.ceil(items / size));
+  const first = JSON.stringify(await gridRows(page, grid));
+
+  await redraw(page, grid, () => pager.locator('.rgPageNext').click());
+  expect(await current()).toBe('2');
+  expect(JSON.stringify(await gridRows(page, grid)), 'page 2 shows other rows').not.toBe(first);
+  await redraw(page, grid, () => pager.locator('.rgPageLast').click());
+  expect(await current()).toBe(String(pages));
+  expect(await rowCount(), 'rows on the last page').toBe(items - (pages - 1) * size);
+  await redraw(page, grid, () => pager.locator('.rgPageFirst').click());
+  expect(await current()).toBe('1');
+  expect(JSON.stringify(await gridRows(page, grid))).toBe(first);
+
+  await pager.locator('[id$="PageSizeComboBox_Arrow"]').click();
+  const bigger = page.locator('.rcbSlide li').locator('visible=true').filter({ hasText: /^\d+$/ }).filter({ hasNotText: String(size) }).last();
+  const biggerSize = Number(await bigger.innerText());
+  await redraw(page, grid, () => bigger.click());
+  expect(await rowCount(), `page size ${biggerSize}`).toBe(Math.min(items, biggerSize));
+  expect(await gridTotal(page, grid), 'same total at any page size').toBe(items);
 }

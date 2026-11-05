@@ -1,4 +1,5 @@
 import { test, expect, Frame, Page } from '@playwright/test';
+import * as fs from 'fs';
 import { openPosPage } from '../../../utils/pos';
 import {
   expectButtons,
@@ -9,7 +10,7 @@ import {
   expectPageTitle,
 } from '../../../utils/screen';
 import { dialogFrame as dialog, expectNoDialog } from '../../../utils/dialog';
-import { redraw } from '../../../utils/webforms';
+import { expectPaging, expectSorts, gridRows, gridTotal, redraw } from '../../../utils/webforms';
 import { nextTestName, TEST_PATRON_ID, TEST_RECORD, TEST_SITE_CODE, TEST_SITE_NAME } from '../../../utils/testData';
 
 // POS > Administration > Special Roster (/POS/SpecialRoster.aspx)
@@ -19,8 +20,8 @@ const LIST = `#${ID}gridSpecialRoster_ctl00`;
 const STUDENTS = `#${ID}gridSpecialRosterStudentList_ctl00`;
 
 test.describe('POS - Administration - Special Roster', () => {
-  test('Special Roster: add, students, print, rename and delete', async ({ page }) => {
-    test.setTimeout(6 * 60_000);
+  test('Special Roster: list, add, lookup, students, print, export, cancel, rename and delete', async ({ page }) => {
+    test.setTimeout(10 * 60_000);
     await openPosPage(page, PATH);
     await expect(page).toHaveTitle(/Special Roster/i);
     await expectPageTitle(page, 'Special Roster');
@@ -32,6 +33,15 @@ test.describe('POS - Administration - Special Roster', () => {
     ]);
     await expectGridColumns(page, `${ID}gridSpecialRoster_ctl00`, ['Region', 'School Name', 'Roster Name']);
     await expectGridResolved(page, `${ID}gridSpecialRoster_ctl00`);
+
+    await test.step('every site: pages, page size and sorting by each column', async () => {
+      await expect(field(page, 'ucAreaSiteSelector_rcbSiteCode_Input')).toHaveValue(/ALL/);
+      for (const row of await gridRows(page, LIST)) expect(row['Region'], row['Roster Name']).not.toBe('');
+      await expectPaging(page, LIST);
+      await expectSorts(page, LIST, 'Roster Name');
+      await expectSorts(page, LIST, 'School Name');
+      await expectSorts(page, LIST, 'Region');
+    });
 
     let name = '';
     try {
@@ -80,10 +90,72 @@ test.describe('POS - Administration - Special Roster', () => {
         ]);
       });
 
+      await test.step('Lookup: OK needs a pick; every search field narrows the list; Cancel adds nothing', async () => {
+        await button(page, 'btnAdd').click();
+        const lookup = await dialog(page, /POSLookup\.aspx/);
+        const grid = `#${ID}gridSearch_ctl00`;
+        await expect(button(lookup, 'btnOK'), 'nothing picked yet').toBeDisabled();
+        await expect(field(lookup, 'rblStudentIdSSNPinStateId_0'), 'ID/SSN by default').toBeChecked();
+        await expect(field(lookup, 'ddlActive_Input')).toHaveValue('Active');
+
+        await search(lookup);
+        expect(await gridTotal(lookup, grid), 'a blank search lists every active patron').toBeGreaterThan(10);
+
+        await type(lookup, 'txtStudentID', TEST_PATRON_ID);
+        const [patron] = await search(lookup);
+        expect(patron, 'the test patron').toBeDefined();
+        expect(patron['Student ID/SSN']).toBe(TEST_PATRON_ID);
+        expect(patron['Site Name']).toBe(TEST_SITE_NAME);
+        // Name shows as "Last, First Middle"; the First name box matches the first name only.
+        const [last, given] = patron['Name'].split(',').map((x) => x.trim());
+        const first = given.split(' ')[0];
+        await type(lookup, 'txtStudentID', '');
+
+        await type(lookup, 'txtLastName', last);
+        for (const r of await search(lookup)) expect(r['Name'].toLowerCase(), 'last name search').toMatch(new RegExp(`^${last.toLowerCase()},`));
+        await type(lookup, 'txtFirstName', first);
+        const both = await search(lookup);
+        expect(both.map((r) => r['Student ID/SSN'])).toContain(TEST_PATRON_ID);
+        for (const r of both) expect(r['Name']).toMatch(new RegExp(`^${last}, ${first}\\b`, 'i'));
+
+        const [m, d, y] = patron['Birth Date'].split('/');
+        const birth = `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+        await type(lookup, 'txtBirthDate', birth);
+        expect((await search(lookup)).map((r) => r['Student ID/SSN']), 'with the birth date').toContain(TEST_PATRON_ID);
+        await type(lookup, 'txtBirthDate', '', '__/__/____');
+
+        await pickCombo(lookup, 'ddlActive', 'Inactive');
+        expect((await search(lookup)).map((r) => r['Student ID/SSN']), 'an active patron is not under Inactive').not.toContain(TEST_PATRON_ID);
+        await pickCombo(lookup, 'ddlActive', 'Active');
+
+        if (patron['Grade']) {
+          await pickCombo(lookup, 'ddlGrade', patron['Grade']);
+          expect((await search(lookup)).map((r) => r['Student ID/SSN']), `grade ${patron['Grade']}`).toContain(TEST_PATRON_ID);
+          await pickCombo(lookup, 'ddlGrade', '--ALL--');
+        }
+
+        await type(lookup, 'txtLastName', '');
+        await type(lookup, 'txtFirstName', '');
+        expect((await search(lookup)).length, 'cleared boxes search everyone again').toBeGreaterThan(1);
+        const all = lookup.locator(`${grid} input[id$="headerChkbox"]`);
+        const boxes = lookup.locator(`${grid} input[id$="chkSelect"]`);
+        await all.check();
+        for (const box of await boxes.all()) await expect(box).toBeChecked();
+        await expect(button(lookup, 'btnOK')).toBeEnabled();
+        await all.uncheck();
+        for (const box of await boxes.all()) await expect(box).not.toBeChecked();
+        await expect(button(lookup, 'btnOK')).toBeDisabled();
+
+        await boxes.first().check();
+        await button(lookup, 'btnCancel').click();
+        await expectNoDialog(page);
+        await expect(page.locator(STUDENTS), 'Cancel adds nobody').toContainText('No records to display.');
+      });
+
       await test.step('Add students: look up the patron and add them', async () => {
         await button(page, 'btnAdd').click();
         const lookup = await dialog(page, /POSLookup\.aspx/);
-        await field(lookup, 'txtStudentID').fill(TEST_PATRON_ID);
+        await type(lookup, 'txtStudentID', TEST_PATRON_ID);
         await button(lookup, 'btnSearch').click();
         const result = lookup.locator(`#${ID}gridSearch_ctl00 > tbody > tr`).filter({ hasText: TEST_PATRON_ID }).first();
         await expect(result).toContainText(TEST_SITE_NAME);
@@ -116,6 +188,30 @@ test.describe('POS - Administration - Special Roster', () => {
         expect(body).toContain(TEST_SITE_NAME);
         expect(body).toContain(`${student.Name} ${student.Grade} ${TEST_PATRON_ID}`);
         await report.close();
+      });
+
+      await test.step('Export: Word, Excel, PDF and CSV each download', async () => {
+        const formats: [string, RegExp][] = [['Word', /\.docx?$/i], ['Excel', /\.xlsx?$/i], ['PDF', /\.pdf$/i], ['CSV (comma delimited)', /\.csv$/i]];
+        for (const [format, extension] of formats) {
+          await page.locator('[id$="toggleExportList"]').first().click();
+          const download = page.waitForEvent('download', { timeout: 60_000 });
+          await page.getByRole('link', { name: format, exact: true }).click();
+          const file = await download;
+          expect(file.suggestedFilename(), format).toMatch(extension);
+          expect((await fs.promises.stat((await file.path())!)).size, `${format} has content`).toBeGreaterThan(0);
+        }
+      });
+
+      await test.step('Cancel throws away an unsaved rename', async () => {
+        await field(page, 'txtSpecialRosterName').fill(`${name} unsaved`);
+        await button(page, 'btnCancl').click();
+        await expect(page).toHaveURL(/SpecialRoster\.aspx/);
+        await showSite(page);
+        const names = (await listed(page)).map((r) => r.name);
+        expect(names).toContain(name);
+        expect(names).not.toContain(`${name} unsaved`);
+        await rosterLink(page, name).click();
+        expect((await students(page)).map((r) => r.ID)).toEqual([TEST_PATRON_ID]);
       });
 
       await test.step('Remove asks first; confirming takes the student off', async () => {
@@ -163,6 +259,43 @@ function field(scope: Page | Frame, id: string) {
 
 function button(scope: Page | Frame, id: string) {
   return scope.locator(`#${ID}${id}`);
+}
+
+/** Type into a lookup box with the keyboard; a plain fill skips the control's own state. */
+async function type(lookup: Frame, id: string, text: string, shown = text): Promise<void> {
+  const box = field(lookup, id);
+  // The date mask sets its caret just after focus and can swallow the first key; type again if so.
+  for (let attempt = 1; ; attempt++) {
+    await box.click();
+    await box.press('Control+A');
+    await box.press('Delete');
+    await box.press('Home');
+    if (text) await box.pressSequentially(text, { delay: 60 });
+    await box.press('Tab');
+    if ((await box.inputValue()) === shown || attempt === 3) break;
+  }
+  await expect(box).toHaveValue(shown);
+}
+
+/** Run the lookup search and read its results. */
+async function search(lookup: Frame): Promise<Record<string, string>[]> {
+  const grid = `#${ID}gridSearch_ctl00`;
+  // The grid is updated in place; the page reports UpdateBenchmark once the update is applied.
+  const page = lookup.page();
+  const applied = page
+    .waitForResponse((r) => r.request().method() === 'POST' && /POSLookup\.aspx/i.test(r.url()) && /btnSearch/.test(r.request().postData() ?? ''))
+    .then(() => page.waitForRequest(/UpdateBenchmark/, { timeout: 60_000 }));
+  await button(lookup, 'btnSearch').click();
+  await applied;
+  return gridRows(lookup, grid);
+}
+
+/** Pick a lookup combo box item by its text. */
+async function pickCombo(scope: Frame, id: string, item: string): Promise<void> {
+  await scope.locator(`#${ID}${id}_Arrow`).click();
+  await scope.locator(`#${ID}${id}_DropDown li`).filter({ hasText: new RegExp(`^\\s*${item}\\s*$`) }).first().click();
+  // Grade values come padded with spaces ("4         ").
+  await expect.poll(async () => (await scope.locator(`#${ID}${id}_Input`).inputValue()).trim()).toBe(item);
 }
 
 function rosterLink(page: Page, name: string) {
