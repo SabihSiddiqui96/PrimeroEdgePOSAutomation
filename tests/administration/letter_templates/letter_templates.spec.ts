@@ -36,6 +36,7 @@ test.describe('POS - Administration - Letter Templates', () => {
     const types = await optionTexts(page, LETTER_TYPE);
     const reminderType = types.find((t) => /Reminder Letter/i.test(t));
     expect(reminderType, 'a reminder letter type').toBeDefined();
+    let restore: { type: string; name: string } | undefined;
 
     try {
       await test.step('every letter type has exactly one active template, which cannot be edited or deleted', async () => {
@@ -75,12 +76,14 @@ test.describe('POS - Administration - Letter Templates', () => {
           test.info().annotations.push({ type: 'note', description: `${type}: no second template to activate` });
           return;
         }
+        restore = { type, name: active.name };
         await activate(page, other.name);
         let now = await rowsOf(page);
         expect(now.find((r) => r.name === other.name)?.active, `${other.name} active`).toBe(true);
         expect(now.find((r) => r.name === active.name)?.active, `${active.name} no longer active`).toBe(false);
         expect(now.filter((r) => r.active)).toHaveLength(1);
         await activate(page, active.name);
+        restore = undefined;
         now = await showType(page, type);
         expect(now.find((r) => r.name === active.name)?.active, `${active.name} active again`).toBe(true);
         expect(now.filter((r) => r.active)).toHaveLength(1);
@@ -207,6 +210,7 @@ test.describe('POS - Administration - Letter Templates', () => {
       });
     } finally {
       await removeCopies(page, reminderType!).catch(() => undefined);
+      if (restore) await showType(page, restore.type).then(() => activate(page, restore!.name)).catch(() => undefined);
     }
   });
 });

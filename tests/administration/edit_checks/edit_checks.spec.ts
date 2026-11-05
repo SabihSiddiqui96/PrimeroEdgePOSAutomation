@@ -209,7 +209,7 @@ test.describe('POS - Administration - Edit Checks', () => {
       const monthly = await allGridRows(page, GRID);
       const inMonth = (r: Record<string, string>) => r['Date'].startsWith(`${String(m).padStart(2, '0')}/`) && r['Date'].endsWith(`/${y}`);
       for (const r of monthly) expect(inMonth(r), `${r['Date']} in ${m}/${y}`).toBe(true);
-      // The 12-month list can start partway into its first month, so compare whole months only.
+      // The 12-month list can start mid-month, so it may hold fewer.
       expect(monthly.length).toBeGreaterThanOrEqual(siteRows.filter(inMonth).length);
     });
 
@@ -224,7 +224,7 @@ test.describe('POS - Administration - Edit Checks', () => {
     });
   });
 
-  // QA: both patron reports fail for site 103 with "Query execution failed for dataset 'dsRPT_POS_PatronParticipation'".
+  // QA: both patron reports fail for site 103 (dsRPT_POS_PatronParticipation query error).
   test.fixme('Edit Checks: patron reports open for a check on the test site', async ({ page }) => {
     await openPosPage(page, PATH);
     await page.locator(`#${INPUT}dateRangeRadioButton`).check();
@@ -257,7 +257,7 @@ async function reportText(page: Page, button: Locator): Promise<string> {
 async function showResolved(page: Page, which: keyof typeof RESOLVED): Promise<number> {
   const radio = page.locator(`#${ID}RBLResolvedType_${RESOLVED[which]}`);
   if (!(await radio.isChecked())) {
-    // The grid is updated in place; the page reports UpdateBenchmark once the update is applied.
+    // The grid updates in place; wait for the filter's postback.
     const applied = page
       .waitForResponse((r) => r.request().method() === 'POST' && /ManageEditCheck\.aspx/i.test(r.url()))
       .then(() => page.waitForRequest(/UpdateBenchmark/, { timeout: 60_000 }));

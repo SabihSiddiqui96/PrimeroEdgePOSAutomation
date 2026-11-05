@@ -173,7 +173,7 @@ test.describe('POS - Administration - Reminders', () => {
       await page.locator(`#${ID}cboxStudentActive`).uncheck();
       await apply(page);
       const inactive = await gridTotal(page, GRID);
-      // Active + Inactive should equal both; QA lists 3 extra with both ticked, covered by the fixme test below.
+      // QA lists 3 extra with both ticked; the exact sum is the fixme test below.
       expect(both, 'both ticked lists at least the active').toBeGreaterThanOrEqual(all);
       expect(both, 'both ticked lists at least the inactive').toBeGreaterThanOrEqual(inactive);
       await page.locator(`#${ID}cboxStudentActive`).check();
@@ -255,7 +255,7 @@ test.describe('POS - Administration - Reminders', () => {
     await test.step('Multiple (3): the letter is for that patron', async () => {
       await page.locator(`#${ID}radioButtonMultipleReminder`).check();
       await page.waitForLoadState('networkidle');
-      // Changing print criteria clears the site on Apply; that is checked in its own test below.
+      // The site is cleared on Apply after a criteria switch; see the fixme test below.
       await pickSite(page, TEST_SITE_CODE);
       await apply(page);
       const first = (await reminders(page))[0];
@@ -281,7 +281,7 @@ test.describe('POS - Administration - Reminders', () => {
     });
   });
 
-  // QA: switching between Students and Staff keeps 103 in the Site Code box, but Apply then lists every site.
+  // QA: after switching Students/Staff, Apply ignores the site still shown in Site Code.
   test.fixme('Reminders: the site filter survives switching between Students and Staff', async ({ page }) => {
     await openPosPage(page, PATH);
     await chooseBalance(page, 3);
@@ -293,7 +293,7 @@ test.describe('POS - Administration - Reminders', () => {
     for (const r of await reminders(page)) expect(r.siteCode).toBe(TEST_SITE_CODE);
   });
 
-  // QA: all balances lists 66 active, 0 inactive, but 69 with both ticked (three Central Office patrons).
+  // QA: 66 active + 0 inactive, yet 69 with both ticked (three Central Office patrons).
   test.fixme('Reminders: Active plus Inactive lists exactly the active and the inactive', async ({ page }) => {
     await openPosPage(page, PATH);
     await chooseBalance(page, 3);
@@ -324,7 +324,7 @@ test.describe('POS - Administration - Reminders', () => {
     expect((await printed).text()).not.toContain('{{');
   });
 
-  // QA: the Multiple (3) letter prints "{{Balance}}" and "{{Current Date}}" instead of the values.
+  // QA: the Multiple (3) letter prints {{Balance}} and {{Current Date}} unfilled.
   test.fixme('Reminders: the Multiple (3) letter fills in the balance and date', async ({ page }) => {
     await openPosPage(page, PATH);
     await page.locator(`#${ID}radioButtonMultipleReminder`).check();

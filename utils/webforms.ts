@@ -47,10 +47,7 @@ export async function typeDate(page: Page, id: string, value: string): Promise<v
 type Manager = { getInstance(): { get_isInAsyncPostBack(): boolean; add_endRequest(handler: () => void): void } };
 type PostbackWindow = { Sys?: { WebForms?: { PageRequestManager?: Manager } }; postbacksDone?: number; gridWas?: string };
 
-/**
- * Run an action that redraws a grid. The old grid is marked; wait for an unmarked one, changed rows or a
- * finished postback. A mark rather than a handle, because the action can reload the whole page.
- */
+/** Run an action that redraws a grid; a mark, not a handle, survives a full reload. */
 export async function redraw(page: Page | Frame, grid: string, action: () => Promise<void>): Promise<void> {
   await postbacksSettled(page);
   const marked = await page.evaluate((sel) => {
@@ -67,7 +64,7 @@ export async function redraw(page: Page | Frame, grid: string, action: () => Pro
     return w.postbacksDone ?? 0;
   }, grid);
   await action();
-  // Some grids are updated in place rather than replaced; QA can take well over 15s to answer.
+  // Replaced, updated in place, or just posted back; QA can take over 15s.
   if (marked !== null) {
     await page.waitForFunction(
       ({ sel, before }) => {
@@ -83,12 +80,16 @@ export async function redraw(page: Page | Frame, grid: string, action: () => Pro
   await postbacksSettled(page);
 }
 
-/** Wait until postbacks stop: a checkbox's own postback can start late, and a click sent during one is dropped. */
+/** Wait until postbacks stop; a click sent during one is dropped. */
 async function postbacksSettled(page: Page | Frame): Promise<void> {
-  const busy = () => page.evaluate(() => {
-    const w = window as unknown as PostbackWindow;
-    return { done: w.postbacksDone ?? 0, active: !!w.Sys?.WebForms?.PageRequestManager?.getInstance().get_isInAsyncPostBack() };
-  });
+  // A full postback reloads the page mid-check; count that as still busy and look again.
+  const busy = () =>
+    page
+      .evaluate(() => {
+        const w = window as unknown as PostbackWindow;
+        return { done: w.postbacksDone ?? 0, active: !!w.Sys?.WebForms?.PageRequestManager?.getInstance().get_isInAsyncPostBack() };
+      })
+      .catch(() => ({ done: -1, active: true }));
   for (let settled = false; !settled; ) {
     await postbackIdle(page);
     const before = await busy();
@@ -100,7 +101,15 @@ async function postbacksSettled(page: Page | Frame): Promise<void> {
 
 /** Wait out an async postback in flight; a click sent during one is dropped. */
 export async function postbackIdle(page: Page | Frame): Promise<void> {
-  await page.waitForFunction(() => !(window as unknown as PostbackWindow).Sys?.WebForms?.PageRequestManager?.getInstance().get_isInAsyncPostBack(), undefined, { timeout: 60_000, polling: 200 });
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.waitForLoadState('load');
+      await page.waitForFunction(() => !(window as unknown as PostbackWindow).Sys?.WebForms?.PageRequestManager?.getInstance().get_isInAsyncPostBack(), undefined, { timeout: 60_000, polling: 200 });
+      return;
+    } catch (e) {
+      if (attempt === 3 || !/context was destroyed|navigation/i.test(String(e))) throw e;
+    }
+  }
 }
 
 /** "32 items in 4 pages" when the grid is paged, otherwise the rows on screen. */

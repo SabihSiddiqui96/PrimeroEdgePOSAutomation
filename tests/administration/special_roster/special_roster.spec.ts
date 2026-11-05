@@ -106,7 +106,7 @@ test.describe('POS - Administration - Special Roster', () => {
         expect(patron, 'the test patron').toBeDefined();
         expect(patron['Student ID/SSN']).toBe(TEST_PATRON_ID);
         expect(patron['Site Name']).toBe(TEST_SITE_NAME);
-        // Name shows as "Last, First Middle"; the First name box matches the first name only.
+        // Names show as "Last, First Middle"; First name matches the first name only.
         const [last, given] = patron['Name'].split(',').map((x) => x.trim());
         const first = given.split(' ')[0];
         await type(lookup, 'txtStudentID', '');
@@ -261,10 +261,10 @@ function button(scope: Page | Frame, id: string) {
   return scope.locator(`#${ID}${id}`);
 }
 
-/** Type into a lookup box with the keyboard; a plain fill skips the control's own state. */
+/** Type into a lookup box; a plain fill skips the control's own state. */
 async function type(lookup: Frame, id: string, text: string, shown = text): Promise<void> {
   const box = field(lookup, id);
-  // The date mask sets its caret just after focus and can swallow the first key; type again if so.
+  // The date mask can swallow the first key after focus; type again if so.
   for (let attempt = 1; ; attempt++) {
     await box.click();
     await box.press('Control+A');
@@ -280,7 +280,7 @@ async function type(lookup: Frame, id: string, text: string, shown = text): Prom
 /** Run the lookup search and read its results. */
 async function search(lookup: Frame): Promise<Record<string, string>[]> {
   const grid = `#${ID}gridSearch_ctl00`;
-  // The grid is updated in place; the page reports UpdateBenchmark once the update is applied.
+  // The grid updates in place; UpdateBenchmark fires once it has.
   const page = lookup.page();
   const applied = page
     .waitForResponse((r) => r.request().method() === 'POST' && /POSLookup\.aspx/i.test(r.url()) && /btnSearch/.test(r.request().postData() ?? ''))

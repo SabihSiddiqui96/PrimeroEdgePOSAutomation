@@ -17,7 +17,7 @@ const ID = 'ctl00_UserContentArea_';
 const LIST = `#${ID}RadGridAdditionalIncome_ctl00`;
 const CHECKS = `#${ID}UCDenomination_gridChecks_ctl00`;
 const COMMENT = 'Sabih-automation testing';
-// The test's own income goes on the first day of the year, away from today's sessions and deposits.
+// Test income goes on Jan 1, away from today's sessions and deposits.
 const INCOME_DATE = usDate(new Date(new Date().getFullYear(), 0, 1));
 const SECOND_DATE = usDate(new Date(new Date().getFullYear(), 0, 2));
 
@@ -275,7 +275,7 @@ async function addIncome(page: Page, date: string, fives: number): Promise<void>
   await cancel(page);
 }
 
-/** Saving a new entry stays on the page: a success message, Save disabled, Cancel becomes Close. */
+/** Saving a new entry stays on the page; Save disables and Cancel becomes Close. */
 async function saveNew(page: Page): Promise<void> {
   await button(page, 'btnSave').click();
   await expect(page.getByText('Adding the Additional Income is completed successfully.').first()).toBeVisible();
