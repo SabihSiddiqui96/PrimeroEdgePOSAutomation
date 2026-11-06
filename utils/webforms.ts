@@ -122,7 +122,10 @@ export async function gridTotal(page: Page | Frame, grid: string): Promise<numbe
 /** Grid rows as { header: cell text }. */
 export async function gridRows(page: Page | Frame, grid: string): Promise<Record<string, string>[]> {
   return page.locator(grid).evaluate((table) => {
-    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th.rgHeader')).map((th) => (th as HTMLElement).innerText.replace(/HeaderText/g, '').trim());
+    // A sorted header also carries its sort button's "Form field N" caption.
+    const headers = Array.from(table.querySelectorAll(':scope > thead > tr > th.rgHeader')).map((th) =>
+      (th as HTMLElement).innerText.replace(/HeaderText|Form field \d+/g, '').trim(),
+    );
     return Array.from(table.querySelectorAll(':scope > tbody > tr.rgRow, :scope > tbody > tr.rgAltRow')).map((tr) =>
       Object.fromEntries(headers.map((h, i) => [h, ((tr.children[i] as HTMLElement)?.innerText ?? '').replace(/HeaderText/g, '').trim()])),
     );
@@ -171,7 +174,8 @@ function sortKey(kind: SortKind, value: string): string | number {
   if (kind === 'number') return Number(value.replace(/[^0-9.-]/g, '')) || 0;
   if (kind === 'date') return Date.parse(value) || 0;
   if (kind === 'grade') return GRADE_ORDER.indexOf(value.toUpperCase());
-  return value.toLowerCase();
+  // SQL Server's word sort skips hyphens and apostrophes.
+  return value.toLowerCase().replace(/[-']/g, '');
 }
 
 function inOrder(keys: (string | number)[], descending: boolean): boolean {
