@@ -82,7 +82,8 @@ export async function apply(page: Page): Promise<void> {
 async function redraw(page: Page, action: () => Promise<void>): Promise<void> {
   const oldGrid = await page.locator(`#${SESSIONS_GRID}`).elementHandle();
   await postback(page, action);
-  await page.waitForFunction((grid) => !grid?.isConnected, oldGrid);
+  // QA can take well over 15s to redraw a busy day.
+  await page.waitForFunction((grid) => !grid?.isConnected, oldGrid, { timeout: 60_000 });
   await expect(page.locator(`#${SESSIONS_GRID}`)).toBeVisible();
 }
 
@@ -135,15 +136,19 @@ export async function showStatus(page: Page, status: 'Reconciled' | 'Deposited',
   await page.locator(`#${ID}chkSessionStatus_${index}`).setChecked(shown);
 }
 
-/** Filter to one site and today, newest session first. */
-export async function filterToday(page: Page, siteCode: string, siteName: string, statuses: ('Reconciled' | 'Deposited')[] = []): Promise<void> {
+/** Filter to one site and one day, newest session first. */
+export async function filterDay(page: Page, siteCode: string, siteName: string, day: string, statuses: ('Reconciled' | 'Deposited')[] = []): Promise<void> {
   await openReconciliation(page);
   await selectSiteCode(page, siteCode);
   await selectSite(page, siteName);
-  await setDateRange(page, today(), today());
+  await setDateRange(page, day, day);
   for (const status of statuses) await showStatus(page, status);
   await apply(page);
   await sortNewestFirst(page);
+}
+
+export async function filterToday(page: Page, siteCode: string, siteName: string, statuses: ('Reconciled' | 'Deposited')[] = []): Promise<void> {
+  await filterDay(page, siteCode, siteName, today(), statuses);
 }
 
 /** Open Reconciliation Info for the session that opened at `openingDate`. */
