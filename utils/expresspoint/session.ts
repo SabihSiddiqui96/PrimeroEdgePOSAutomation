@@ -136,6 +136,14 @@ export async function signInWithWindows(): Promise<ExpressPointHandle> {
     },
     { noWaitAfter: true },
   );
+  // The Square token warning can pop up after any screen change and block the next click.
+  await window.addLocatorHandler(
+    window.locator('ion-alert').filter({ hasText: /Warning/i }).first(),
+    async (alert) => {
+      await alert.locator('button').filter({ hasText: /^(ok|continue)$/i }).first().click({ timeout: 3_000 }).catch(() => undefined);
+    },
+    { noWaitAfter: true },
+  );
   await window.locator('ion-button', { hasText: 'Use Windows Login' }).click({ timeout: 30_000 });
   await expect(window.getByText('Serving Options for').first()).toBeVisible({ timeout: 45_000 });
   await settle(window);
@@ -158,9 +166,16 @@ export async function servingStation(window: Page): Promise<{ site: string; term
 export async function openService(window: Page, dollars: string): Promise<string> {
   if (await appears(dashboardItem(window, /Continue Service/i), 3_000)) {
     await dashboardItem(window, /Continue Service/i).click();
+    // A session from another day isn't one of ours: leave it for a person to close.
+    const otherDay = window.locator('ion-alert').filter({ hasText: /Session is not set to current date/i });
+    if (await appears(otherDay, 5_000)) {
+      const day = (await otherDay.innerText()).match(/transactions for (\d+\/\d+\/\d{4})/)?.[1] ?? 'another day';
+      await otherDay.locator('button').filter({ hasText: /^no$/i }).click();
+      throw new Error(`ExpressPoint has a session still open from ${day}; close it on the terminal before running this test`);
+    }
     await settle(window);
     await dismissWarnings(window);
-    // A session left open by an earlier run would block Open Service.
+    // A session left open by an earlier run today would block Open Service.
     await closeService(window, dollars);
   }
 
@@ -229,8 +244,14 @@ export async function chargeMeal(window: Page, patronId = DEFAULT_PATRON_ID): Pr
   const totalText = await window.getByText(/Total Amount Due/i).first().innerText();
   const total = totalText.match(/\$\s*([\d,]+\.\d{2})/)?.[1] ?? '';
   expect(total, 'total amount due').not.toBe('');
-  const lines = await orderLines(window);
-  expect(lines.length, 'order lines read from the order panel').toBe(items);
+  // The panel can still be drawing the last item when the count updates.
+  let lines: SaleLine[] = [];
+  await expect
+    .poll(async () => {
+      lines = await orderLines(window);
+      return lines.reduce((n, l) => n + l.quantity, 0);
+    }, { message: 'order lines read from the order panel', timeout: 15_000 })
+    .toBe(items);
 
   const charge = window.locator('ion-button').filter({ hasText: /Charge/i }).last();
   await expect(charge).toBeVisible();
@@ -247,13 +268,13 @@ export async function chargeMeal(window: Page, patronId = DEFAULT_PATRON_ID): Pr
   return { items, total, lines };
 }
 
-/** The order panel: "Ext. Milk 1 $0.20 Free Lunch Meal 1 $20.00 ..." between its header and total. */
+/** The order panel: "Ext. Milk 1 $0.20", or at breakfast "Breakfast Meal $20.00" then its "Potato * 1 $20.00" parts. */
 async function orderLines(window: Page): Promise<SaleLine[]> {
   const text = (await window.locator('body').innerText()).replace(/\s+/g, ' ');
   const panel = text.match(/Quantity Amount (.*?) Total Amount Due/i)?.[1] ?? '';
-  return [...panel.matchAll(/(.+?) (\d+) \$(\d[\d,]*\.\d{2}) ?/g)].map((m) => ({
-    name: m[1].trim(),
-    quantity: Number(m[2]),
+  return [...panel.matchAll(/([^$]+?) (?:(\d+) )?\$(\d[\d,]*\.\d{2})/g)].map((m) => ({
+    name: m[1].replace(/\s*\*$/, '').trim(),
+    quantity: Number(m[2] ?? 1),
     amount: m[3],
   }));
 }
@@ -303,15 +324,20 @@ export function randomDollars(min: number, max: number): string {
 }
 
 /** Open service, charge one meal, close service: one closed session on the server. */
+export type OpenSession = Omit<RecordedSession, 'closingBalance'>;
+
 export async function recordChargedSession(
   openingDollars = randomDollars(20, 60),
   closingDollars = randomDollars(61, 99),
+  /** Runs after the sale while the service is still open, e.g. to look at it on the website. */
+  whileOpen?: (session: OpenSession) => Promise<void>,
 ): Promise<RecordedSession> {
   const handle = await signInWithWindows();
   try {
     const { site, terminal } = await servingStation(handle.window);
     const openingBalance = await openService(handle.window, openingDollars);
     const sale = await chargeMeal(handle.window);
+    if (whileOpen) await whileOpen({ site, terminal, openingBalance, sale });
     const closingBalance = await closeService(handle.window, closingDollars);
     return { site, terminal, openingBalance, closingBalance, sale };
   } catch (error) {

@@ -178,7 +178,8 @@ test.describe('POS - Administration - Reconciliation - ExpressPoint session', ()
       expect(text).toContain(`Terminal: ${session.terminal}`);
       expect(text.toLowerCase()).toContain(`serving site: ${siteCode} ${siteName}`.toLowerCase());
       for (const line of session.sale.lines) {
-        expect(text, `report line for ${line.name}`).toMatch(new RegExp(`${escape(line.name)} \\S+ \\d+ ${escape(line.amount)}`));
+        // The meal status can run to two words, as in "Second Meal".
+        expect(text, `report line for ${line.name}`).toMatch(new RegExp(`${escape(line.name)} [A-Za-z]+(?: [A-Za-z]+)? \\d+ ${escape(line.amount)}`));
       }
       expect(text).toMatch(new RegExp(`Session Total \\d+ ${escape(session.sale.total)}`));
       await report.close();
