@@ -208,6 +208,7 @@ export async function expectPaging(page: Page, grid: string): Promise<void> {
   };
   const rowCount = () => page.locator(`${grid} > tbody > tr.rgRow, ${grid} > tbody > tr.rgAltRow`).count();
   const current = () => pager.locator('.rgCurrentPage').innerText();
+  if ((await current()).trim() !== '1') await redraw(page, grid, () => pager.locator('.rgPageFirst').click());
   const { items, pages } = await info();
   expect(pages, `${grid}: more than one page`).toBeGreaterThan(1);
   const size = await rowCount();
@@ -217,7 +218,7 @@ export async function expectPaging(page: Page, grid: string): Promise<void> {
   await redraw(page, grid, () => pager.locator('.rgPageNext').click());
   expect(await current()).toBe('2');
   expect(JSON.stringify(await gridRows(page, grid)), 'page 2 shows other rows').not.toBe(first);
-  await redraw(page, grid, () => pager.locator('.rgPageLast').click());
+  if (pages > 2) await redraw(page, grid, () => pager.locator('.rgPageLast').click());
   expect(await current()).toBe(String(pages));
   expect(await rowCount(), 'rows on the last page').toBe(items - (pages - 1) * size);
   await redraw(page, grid, () => pager.locator('.rgPageFirst').click());
